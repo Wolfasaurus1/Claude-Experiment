@@ -153,7 +153,7 @@ void VoxelRenderer::buildGreedyMesh(int chunkSizeX, int chunkSizeY, int chunkSiz
         VoxelFace::Direction direction = static_cast<VoxelFace::Direction>(faceDir);
         
         // Determine which dimensions to iterate based on the current face direction
-        int dimU, dimV, dimW; // dimW is perpendicular to the face
+        int dimU = 0, dimV = 0, dimW = 0; // Initialize to prevent warnings
         
         switch (direction) {
             case VoxelFace::Direction::Front:  // +Z
@@ -171,7 +171,8 @@ void VoxelRenderer::buildGreedyMesh(int chunkSizeX, int chunkSizeY, int chunkSiz
         }
         
         // Get the dimensions of the chunk
-        int uSize, vSize, wSize;
+        int uSize = 0, vSize = 0, wSize = 0; // Initialize to prevent warnings
+        
         switch (dimU) {
             case 0: uSize = chunkSizeX; break;
             case 1: uSize = chunkSizeY; break;
@@ -198,27 +199,25 @@ void VoxelRenderer::buildGreedyMesh(int chunkSizeX, int chunkSizeY, int chunkSiz
             for (int v = 0; v < vSize; v++) {
                 for (int u = 0; u < uSize; u++) {
                     // Convert from uvw coordinates to xyz coordinates
-                    int x, y, z;
-                    switch (dimU) {
-                        case 0: x = u; break;
-                        case 1: y = u; break;
-                        case 2: z = u; break;
-                    }
-                    switch (dimV) {
-                        case 0: x = v; break;
-                        case 1: y = v; break;
-                        case 2: z = v; break;
-                    }
-                    switch (dimW) {
-                        case 0: x = w; break;
-                        case 1: y = w; break;
-                        case 2: z = w; break;
-                    }
+                    glm::ivec3 pos(0, 0, 0);
+                    
+                    // Properly map UVW to XYZ without overwriting
+                    if (dimU == 0) pos.x = u;
+                    else if (dimU == 1) pos.y = u;
+                    else if (dimU == 2) pos.z = u;
+                    
+                    if (dimV == 0) pos.x = v;
+                    else if (dimV == 1) pos.y = v;
+                    else if (dimV == 2) pos.z = v;
+                    
+                    if (dimW == 0) pos.x = w;
+                    else if (dimW == 1) pos.y = w;
+                    else if (dimW == 2) pos.z = w;
                     
                     // Check if a face should be rendered at this position
-                    if (shouldRenderFaceFunc(x, y, z, direction)) {
+                    if (shouldRenderFaceFunc(pos.x, pos.y, pos.z, direction)) {
                         mask[v][u] = true;
-                        types[v][u] = getVoxelFunc(x, y, z);
+                        types[v][u] = getVoxelFunc(pos.x, pos.y, pos.z);
                         totalFacesBeforeMerging++;
                     }
                 }
@@ -265,25 +264,25 @@ void VoxelRenderer::buildGreedyMesh(int chunkSizeX, int chunkSizeY, int chunkSiz
                         
                         // Convert from uvw to xyz for the starting position
                         glm::ivec3 start(0, 0, 0);
-                        switch (dimU) {
-                            case 0: start.x = u; break;
-                            case 1: start.y = u; break;
-                            case 2: start.z = u; break;
-                        }
-                        switch (dimV) {
-                            case 0: start.x = v; break;
-                            case 1: start.y = v; break;
-                            case 2: start.z = v; break;
-                        }
-                        switch (dimW) {
-                            case 0: start.x = w; break;
-                            case 1: start.y = w; break;
-                            case 2: start.z = w; break;
-                        }
                         
-                        // Set the start position and size
-                        mergedFace.start = start + chunkPos * glm::ivec3(chunkSizeX, 0, chunkSizeZ);
+                        // Properly map UVW to XYZ for the start position
+                        if (dimU == 0) start.x = u;
+                        else if (dimU == 1) start.y = u;
+                        else if (dimU == 2) start.z = u;
+                        
+                        if (dimV == 0) start.x = v;
+                        else if (dimV == 1) start.y = v;
+                        else if (dimV == 2) start.z = v;
+                        
+                        if (dimW == 0) start.x = w;
+                        else if (dimW == 1) start.y = w;
+                        else if (dimW == 2) start.z = w;
+                        
+                        // Also store the dimensional information for correct vertex generation
                         mergedFace.size = glm::ivec2(width, height);
+                        
+                        // Calculate the actual world position
+                        mergedFace.start = start + chunkPos * glm::ivec3(chunkSizeX, 0, chunkSizeZ);
                         
                         // Add the merged face
                         m_MergedFaces.push_back(mergedFace);
@@ -464,28 +463,28 @@ std::vector<Vertex> VoxelRenderer::generateMergedFaceVertices(const MergedFace& 
             vertices[3] = { glm::vec3(x + width, y,          z), glm::vec3(0, 0, -1), glm::vec2(1, 0), color };
             break;
         case VoxelFace::Direction::Top: // +Y
-            vertices[0] = { glm::vec3(x,         y + m_VoxelSize, z        ), glm::vec3(0, 1, 0), glm::vec2(0, 0), color };
-            vertices[1] = { glm::vec3(x,         y + m_VoxelSize, z + width), glm::vec3(0, 1, 0), glm::vec2(0, 1), color };
-            vertices[2] = { glm::vec3(x + height, y + m_VoxelSize, z + width), glm::vec3(0, 1, 0), glm::vec2(1, 1), color };
-            vertices[3] = { glm::vec3(x + height, y + m_VoxelSize, z        ), glm::vec3(0, 1, 0), glm::vec2(1, 0), color };
+            vertices[0] = { glm::vec3(x,          y + m_VoxelSize, z         ), glm::vec3(0, 1, 0), glm::vec2(0, 0), color };
+            vertices[1] = { glm::vec3(x,          y + m_VoxelSize, z + height), glm::vec3(0, 1, 0), glm::vec2(0, 1), color };
+            vertices[2] = { glm::vec3(x + width,  y + m_VoxelSize, z + height), glm::vec3(0, 1, 0), glm::vec2(1, 1), color };
+            vertices[3] = { glm::vec3(x + width,  y + m_VoxelSize, z         ), glm::vec3(0, 1, 0), glm::vec2(1, 0), color };
             break;
         case VoxelFace::Direction::Bottom: // -Y
-            vertices[0] = { glm::vec3(x,         y, z        ), glm::vec3(0, -1, 0), glm::vec2(0, 0), color };
-            vertices[1] = { glm::vec3(x + height, y, z        ), glm::vec3(0, -1, 0), glm::vec2(1, 0), color };
-            vertices[2] = { glm::vec3(x + height, y, z + width), glm::vec3(0, -1, 0), glm::vec2(1, 1), color };
-            vertices[3] = { glm::vec3(x,         y, z + width), glm::vec3(0, -1, 0), glm::vec2(0, 1), color };
+            vertices[0] = { glm::vec3(x,         y, z         ), glm::vec3(0, -1, 0), glm::vec2(0, 0), color };
+            vertices[1] = { glm::vec3(x + width, y, z         ), glm::vec3(0, -1, 0), glm::vec2(1, 0), color };
+            vertices[2] = { glm::vec3(x + width, y, z + height), glm::vec3(0, -1, 0), glm::vec2(1, 1), color };
+            vertices[3] = { glm::vec3(x,         y, z + height), glm::vec3(0, -1, 0), glm::vec2(0, 1), color };
             break;
         case VoxelFace::Direction::Right: // +X
-            vertices[0] = { glm::vec3(x + m_VoxelSize, y,          z        ), glm::vec3(1, 0, 0), glm::vec2(0, 0), color };
-            vertices[1] = { glm::vec3(x + m_VoxelSize, y + height, z        ), glm::vec3(1, 0, 0), glm::vec2(0, 1), color };
-            vertices[2] = { glm::vec3(x + m_VoxelSize, y + height, z + width), glm::vec3(1, 0, 0), glm::vec2(1, 1), color };
-            vertices[3] = { glm::vec3(x + m_VoxelSize, y,          z + width), glm::vec3(1, 0, 0), glm::vec2(1, 0), color };
+            vertices[0] = { glm::vec3(x + m_VoxelSize, y,          z         ), glm::vec3(1, 0, 0), glm::vec2(0, 0), color };
+            vertices[1] = { glm::vec3(x + m_VoxelSize, y + height, z         ), glm::vec3(1, 0, 0), glm::vec2(0, 1), color };
+            vertices[2] = { glm::vec3(x + m_VoxelSize, y + height, z + width ), glm::vec3(1, 0, 0), glm::vec2(1, 1), color };
+            vertices[3] = { glm::vec3(x + m_VoxelSize, y,          z + width ), glm::vec3(1, 0, 0), glm::vec2(1, 0), color };
             break;
         case VoxelFace::Direction::Left: // -X
-            vertices[0] = { glm::vec3(x, y,          z + width), glm::vec3(-1, 0, 0), glm::vec2(0, 0), color };
-            vertices[1] = { glm::vec3(x, y,          z        ), glm::vec3(-1, 0, 0), glm::vec2(1, 0), color };
-            vertices[2] = { glm::vec3(x, y + height, z        ), glm::vec3(-1, 0, 0), glm::vec2(1, 1), color };
-            vertices[3] = { glm::vec3(x, y + height, z + width), glm::vec3(-1, 0, 0), glm::vec2(0, 1), color };
+            vertices[0] = { glm::vec3(x, y,          z + width ), glm::vec3(-1, 0, 0), glm::vec2(0, 0), color };
+            vertices[1] = { glm::vec3(x, y,          z         ), glm::vec3(-1, 0, 0), glm::vec2(1, 0), color };
+            vertices[2] = { glm::vec3(x, y + height, z         ), glm::vec3(-1, 0, 0), glm::vec2(1, 1), color };
+            vertices[3] = { glm::vec3(x, y + height, z + width ), glm::vec3(-1, 0, 0), glm::vec2(0, 1), color };
             break;
     }
     

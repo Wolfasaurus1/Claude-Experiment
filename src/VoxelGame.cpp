@@ -1,4 +1,5 @@
 #include "VoxelGame.hpp"
+#include "Renderer/Camera.hpp"
 #include "Renderer/Screenshot.hpp"
 #include <GLFW/glfw3.h>
 #include <iostream>
@@ -11,13 +12,21 @@
 namespace VoxelEngine {
 
 VoxelGame::VoxelGame()
-    : Application("Voxel Game with Greedy Meshing", 1600, 900)
+    : Application("Voxel Game with Greedy Meshing", 1600, 900),
+      m_Camera(45.0f, 16.0f / 9.0f, 0.1f, 1000.0f),
+      m_ScreenshotCounter(0),
+      m_TakeScreenshotNextFrame(false)
 {
+    // Create screenshots directory if it doesn't exist
+    m_ScreenshotPath = "screenshots/";
+    std::filesystem::create_directory(m_ScreenshotPath);
 }
 
 VoxelGame::~VoxelGame() {
-    // Clean up resources specific to VoxelGame
-    // The base class will handle its own cleanup
+    // Clean up chunks
+    for (auto& pair : m_Chunks) {
+        delete pair.second;
+    }
     m_Chunks.clear();
 }
 
@@ -28,120 +37,103 @@ void VoxelGame::onInit() {
     // Set clear color to sky blue
     glClearColor(0.5f, 0.7f, 1.0f, 1.0f);
     
+    // Set initial camera position and rotation
+    m_Camera.setPosition(glm::vec3(32.0f, 32.0f, 32.0f));
+    m_Camera.setRotation(-45.0f, -30.0f);
+    
     // Generate test world
     generateTestWorld();
-    
-    // Calculate the center of the world
-    float worldCenterX = 4.0f * Chunk::CHUNK_SIZE_X * 0.5f;
-    float worldCenterZ = 4.0f * Chunk::CHUNK_SIZE_Z * 0.5f;
-    
-    // Set up camera to better see the terrain
-    m_Camera->setPosition(glm::vec3(worldCenterX + 20.0f, 30.0f, worldCenterZ + 20.0f));
-    m_Camera->setRotation(-45.0f, -35.0f); // Look down at an angle toward the center
-    
-    // Disable cursor for camera control
-    m_Window->disableCursor();
-    
-    // Take an initial screenshot after the first frame
-    m_TakeScreenshotNextFrame = true;
 }
 
 void VoxelGame::onUpdate(float deltaTime) {
-    // Process camera movement
-    const float cameraSpeed = 5.0f * deltaTime;
+    // Handle camera movement
+    // Forward/backward
+    if (isKeyPressed(GLFW_KEY_W)) {
+        m_Camera.moveForward(10.0f * deltaTime);
+    }
+    if (isKeyPressed(GLFW_KEY_S)) {
+        m_Camera.moveForward(-10.0f * deltaTime);
+    }
     
-    if (m_Window->isKeyPressed(GLFW_KEY_W)) {
-        m_Camera->moveForward(cameraSpeed);
+    // Left/right
+    if (isKeyPressed(GLFW_KEY_A)) {
+        m_Camera.moveRight(-10.0f * deltaTime);
     }
-    if (m_Window->isKeyPressed(GLFW_KEY_S)) {
-        m_Camera->moveForward(-cameraSpeed);
+    if (isKeyPressed(GLFW_KEY_D)) {
+        m_Camera.moveRight(10.0f * deltaTime);
     }
-    if (m_Window->isKeyPressed(GLFW_KEY_A)) {
-        m_Camera->moveRight(-cameraSpeed);
+    
+    // Up/down
+    if (isKeyPressed(GLFW_KEY_SPACE)) {
+        m_Camera.moveUp(10.0f * deltaTime);
     }
-    if (m_Window->isKeyPressed(GLFW_KEY_D)) {
-        m_Camera->moveRight(cameraSpeed);
-    }
-    if (m_Window->isKeyPressed(GLFW_KEY_SPACE)) {
-        m_Camera->moveUp(cameraSpeed);
-    }
-    if (m_Window->isKeyPressed(GLFW_KEY_LEFT_SHIFT)) {
-        m_Camera->moveUp(-cameraSpeed);
+    if (isKeyPressed(GLFW_KEY_LEFT_SHIFT)) {
+        m_Camera.moveUp(-10.0f * deltaTime);
     }
     
     // Update camera
-    m_Camera->update(deltaTime);
+    m_Camera.update(deltaTime);
+    
+    // Take screenshot if requested
+    if (m_TakeScreenshotNextFrame) {
+        takeScreenshot();
+        m_TakeScreenshotNextFrame = false;
+    }
+    
+    // Toggle screenshot on F2
+    if (isKeyPressed(GLFW_KEY_F2) && !isKeyPressedLastFrame(GLFW_KEY_F2)) {
+        m_TakeScreenshotNextFrame = true;
+    }
 }
 
 void VoxelGame::onRender() {
-    // Clear the screen with the sky color
+    // Clear the screen
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     
-    // Set viewport
-    int width = m_Window->getWidth();
-    int height = m_Window->getHeight();
-    glViewport(0, 0, width, height);
-    
     // Render all chunks
-    for (const auto& chunk : m_Chunks) {
-        chunk->render(m_Camera->getViewMatrix(), m_Camera->getProjectionMatrix());
+    for (const auto& pair : m_Chunks) {
+        pair.second->render(m_Camera.getViewMatrix(), m_Camera.getProjectionMatrix());
     }
-    
-    // Take a screenshot if the flag is set
-    if (m_TakeScreenshotNextFrame) {
-        m_TakeScreenshotNextFrame = false;
-        // Wait for rendering to complete
-        glFinish();
-        // Take the screenshot
-        takeScreenshot();
-    }
+}
+
+void VoxelGame::onImGuiRender() {
+    // ImGui rendering if needed
 }
 
 void VoxelGame::onShutdown() {
-    m_Chunks.clear();
+    // Any additional cleanup
 }
 
-void VoxelGame::onKeyPressed(int key) {
-    if (key == GLFW_KEY_ESCAPE) {
-        close();
-    }
-    else if (key == GLFW_KEY_F2 || key == GLFW_KEY_P) {
-        // Set the flag to take a screenshot on the next frame
-        m_TakeScreenshotNextFrame = true;
-        std::cout << "Screenshot requested - will be taken on next frame" << std::endl;
-    }
-}
-
-void VoxelGame::onMouseMoved(double xPos, double yPos) {
-    static bool firstMouse = true;
-    static double lastX = 0.0, lastY = 0.0;
+void VoxelGame::takeScreenshot() {
+    // Create a unique filename with date and time
+    auto now = std::chrono::system_clock::now();
+    auto in_time_t = std::chrono::system_clock::to_time_t(now);
     
-    if (firstMouse) {
-        lastX = xPos;
-        lastY = yPos;
-        firstMouse = false;
-    }
+    std::stringstream ss;
+    ss << m_ScreenshotPath << "screenshot_" 
+       << std::put_time(std::localtime(&in_time_t), "%Y%m%d_%H%M%S")
+       << "_" << m_ScreenshotCounter << ".bmp";
     
-    // Calculate offset
-    float xOffset = static_cast<float>(xPos - lastX);
-    float yOffset = static_cast<float>(lastY - yPos); // Reversed: y ranges bottom to top
+    std::string filename = ss.str();
+    m_ScreenshotCounter++;
     
-    // Update last position
-    lastX = xPos;
-    lastY = yPos;
+    // Save the screenshot
+    saveScreenshot(filename);
     
-    // Process mouse movement for camera rotation
-    m_Camera->processMouseMovement(xOffset, yOffset);
-}
-
-void VoxelGame::onWindowResized(int width, int height) {
-    // Update viewport and camera projection is handled in the Application base class
+    std::cout << "Screenshot saved to " << filename << std::endl;
 }
 
 void VoxelGame::generateTestWorld() {
-    // Generate a simple flat terrain with some structures
-    const int worldSizeX = 4; // in chunks
-    const int worldSizeZ = 4; // in chunks
+    // Generate a varied terrain with hills, valleys, and different biomes
+    const int worldSizeX = 6; // in chunks (increased from 4)
+    const int worldSizeZ = 6; // in chunks (increased from 4)
+    
+    // Simple noise function to generate terrain height
+    auto simpleNoise = [](float x, float z) -> float {
+        return sinf(x * 0.1f) * cosf(z * 0.1f) * 3.0f + 
+               sinf(x * 0.05f + z * 0.05f) * 5.0f + 
+               cosf(x * 0.02f - z * 0.03f) * 2.0f;
+    };
     
     // Create chunks
     for (int cz = 0; cz < worldSizeZ; cz++) {
@@ -149,116 +141,155 @@ void VoxelGame::generateTestWorld() {
             // Create a new chunk
             Chunk* chunk = getOrCreateChunk(cx, 0, cz);
             
+            // Define biome type based on position
+            enum class BiomeType {
+                Plains,
+                Hills,
+                Mountains,
+                Desert,
+                Forest
+            };
+            
+            // Determine biome for this chunk
+            BiomeType biome;
+            float biomeNoise = simpleNoise(cx * 100.0f, cz * 100.0f);
+            
+            if (biomeNoise > 4.0f) {
+                biome = BiomeType::Mountains;
+            } else if (biomeNoise > 2.0f) {
+                biome = BiomeType::Hills;
+            } else if (biomeNoise > 0.0f) {
+                biome = BiomeType::Plains;
+            } else if (biomeNoise > -2.0f) {
+                biome = BiomeType::Forest;
+            } else {
+                biome = BiomeType::Desert;
+            }
+            
             // Fill the chunk with terrain
             for (int x = 0; x < Chunk::CHUNK_SIZE_X; x++) {
                 for (int z = 0; z < Chunk::CHUNK_SIZE_Z; z++) {
+                    // Calculate world coordinates for noise
+                    float worldX = cx * Chunk::CHUNK_SIZE_X + x;
+                    float worldZ = cz * Chunk::CHUNK_SIZE_Z + z;
+                    
+                    // Base terrain height
+                    int baseHeight = 4;
+                    
+                    // Apply height variation based on biome and noise
+                    float terrainHeight = simpleNoise(worldX, worldZ);
+                    
+                    // Adjust height based on biome
+                    switch (biome) {
+                        case BiomeType::Mountains:
+                            terrainHeight *= 2.5f;
+                            baseHeight = 8;
+                            break;
+                        case BiomeType::Hills:
+                            terrainHeight *= 1.5f;
+                            baseHeight = 6;
+                            break;
+                        case BiomeType::Plains:
+                            terrainHeight *= 0.5f;
+                            baseHeight = 4;
+                            break;
+                        case BiomeType::Forest:
+                            terrainHeight *= 0.8f;
+                            baseHeight = 5;
+                            break;
+                        case BiomeType::Desert:
+                            terrainHeight *= 0.3f;
+                            terrainHeight = abs(terrainHeight); // Create dunes
+                            baseHeight = 3;
+                            break;
+                    }
+                    
+                    // Calculate final height (clamped between 1 and 40)
+                    int height = std::max(1, std::min(40, static_cast<int>(baseHeight + terrainHeight)));
+                    
                     // Bedrock layer
                     chunk->setVoxel(x, 0, z, VoxelType::Stone);
                     
-                    // Dirt layers
-                    for (int y = 1; y < 4; y++) {
-                        chunk->setVoxel(x, y, z, VoxelType::Dirt);
+                    // Fill with stone up to near the top
+                    for (int y = 1; y < height - 2; y++) {
+                        chunk->setVoxel(x, y, z, VoxelType::Stone);
                     }
                     
-                    // Grass top layer
-                    chunk->setVoxel(x, 4, z, VoxelType::Grass);
-                    
-                    // Add some water features
-                    if ((cx == 1 || cx == 2) && (cz == 1 || cz == 2) && 
-                        x > 4 && x < 12 && z > 4 && z < 12) {
-                        // Create a lake in the center of the world
-                        chunk->setVoxel(x, 4, z, VoxelType::Water);
-                        chunk->setVoxel(x, 3, z, VoxelType::Sand);
-                        chunk->setVoxel(x, 2, z, VoxelType::Sand);
+                    // Add different top layers based on biome
+                    switch (biome) {
+                        case BiomeType::Desert:
+                            // Desert has sand on top
+                            chunk->setVoxel(x, height - 2, z, VoxelType::Sand);
+                            chunk->setVoxel(x, height - 1, z, VoxelType::Sand);
+                            break;
+                        
+                        case BiomeType::Mountains:
+                            // Mountains have stone on top if high enough
+                            if (height > 15) {
+                                chunk->setVoxel(x, height - 2, z, VoxelType::Stone);
+                                chunk->setVoxel(x, height - 1, z, VoxelType::Stone);
+                            } else {
+                                chunk->setVoxel(x, height - 2, z, VoxelType::Dirt);
+                                chunk->setVoxel(x, height - 1, z, VoxelType::Grass);
+                            }
+                            break;
+                        
+                        default:
+                            // Most biomes have dirt with grass on top
+                            chunk->setVoxel(x, height - 2, z, VoxelType::Dirt);
+                            chunk->setVoxel(x, height - 1, z, VoxelType::Grass);
+                            break;
                     }
                     
-                    // Add sand around the lake
-                    if ((cx == 1 || cx == 2) && (cz == 1 || cz == 2) && 
-                        ((x >= 3 && x <= 4 && z >= 3 && z <= 12) ||
-                         (x >= 12 && x <= 13 && z >= 3 && z <= 12) ||
-                         (x >= 3 && x <= 13 && z >= 3 && z <= 4) ||
-                         (x >= 3 && x <= 13 && z >= 12 && z <= 13))) {
-                        chunk->setVoxel(x, 4, z, VoxelType::Sand);
+                    // Add water at a fixed level
+                    const int waterLevel = 5;
+                    if (height < waterLevel) {
+                        for (int y = height; y < waterLevel; y++) {
+                            chunk->setVoxel(x, y, z, VoxelType::Water);
+                        }
+                        // Convert dirt/grass under water to sand
+                        if (height >= 2) {
+                            chunk->setVoxel(x, height - 1, z, VoxelType::Sand);
+                        }
                     }
                 }
             }
             
-            // Add a simple structure in each chunk
-            int centerX = Chunk::CHUNK_SIZE_X / 2;
-            int centerZ = Chunk::CHUNK_SIZE_Z / 2;
-            
-            // Base height
-            int baseY = 5;
-            
-            // Skip structures in the lake area
-            bool isLakeArea = (cx == 1 || cx == 2) && (cz == 1 || cz == 2);
-            
-            if (!isLakeArea) {
-                if ((cx % 2 == 0 && cz % 2 == 0) || (cx % 2 == 1 && cz % 2 == 1)) {
-                    // Add a stone tower
-                    for (int y = baseY; y < baseY + 6; y++) {
-                        for (int x = centerX - 2; x <= centerX + 2; x++) {
-                            for (int z = centerZ - 2; z <= centerZ + 2; z++) {
-                                // Skip if out of bounds
-                                if (x < 0 || x >= Chunk::CHUNK_SIZE_X || z < 0 || z >= Chunk::CHUNK_SIZE_Z) {
-                                    continue;
-                                }
-                                
-                                // Only build the walls (hollow inside)
-                                if (x == centerX - 2 || x == centerX + 2 || z == centerZ - 2 || z == centerZ + 2) {
-                                    // Alternate stone and different materials for more visual interest
-                                    if (y % 2 == 0) {
-                                        chunk->setVoxel(x, y, z, VoxelType::Stone);
-                                    } else {
-                                        chunk->setVoxel(x, y, z, VoxelType::Sand);
-                                    }
-                                }
-                            }
-                        }
-                    }
+            // Add structures based on biome type
+            switch (biome) {
+                case BiomeType::Forest:
+                    // Add many trees
+                    addTrees(chunk, 15, 4, 7);
+                    break;
+                
+                case BiomeType::Plains:
+                    // Add few scattered trees
+                    addTrees(chunk, 5, 3, 5);
+                    break;
+                
+                case BiomeType::Hills:
+                    // Add some trees and maybe a small structure
+                    addTrees(chunk, 8, 4, 6);
                     
-                    // Add a pyramid top
-                    for (int layer = 0; layer < 3; layer++) {
-                        int y = baseY + 6 + layer;
-                        for (int x = centerX - 2 + layer; x <= centerX + 2 - layer; x++) {
-                            for (int z = centerZ - 2 + layer; z <= centerZ + 2 - layer; z++) {
-                                chunk->setVoxel(x, y, z, VoxelType::Stone);
-                            }
-                        }
+                    // Maybe add a small house on a hill
+                    if ((cx + cz) % 3 == 0) {
+                        addHouse(chunk);
                     }
-                } else {
-                    // Add trees
-                    int treeHeight = 5;
-                    
-                    // Tree trunk
-                    for (int y = baseY; y < baseY + treeHeight; y++) {
-                        chunk->setVoxel(centerX, y, centerZ, VoxelType::Wood);
+                    break;
+                
+                case BiomeType::Mountains:
+                    // Add a mountain tower
+                    if ((cx + cz) % 4 == 0) {
+                        addTower(chunk, true);
                     }
-                    
-                    // Tree leaves
-                    for (int y = baseY + treeHeight - 2; y < baseY + treeHeight + 2; y++) {
-                        for (int x = centerX - 2; x <= centerX + 2; x++) {
-                            for (int z = centerZ - 2; z <= centerZ + 2; z++) {
-                                // Skip if out of bounds
-                                if (x < 0 || x >= Chunk::CHUNK_SIZE_X || z < 0 || z >= Chunk::CHUNK_SIZE_Z) {
-                                    continue;
-                                }
-                                
-                                // Add leaves in a sphere-like pattern
-                                int dx = x - centerX;
-                                int dy = y - (baseY + treeHeight);
-                                int dz = z - centerZ;
-                                
-                                if (dx * dx + dy * dy + dz * dz <= 8) {
-                                    // Skip the trunk
-                                    if (!(x == centerX && z == centerZ && y < baseY + treeHeight)) {
-                                        chunk->setVoxel(x, y, z, VoxelType::Leaves);
-                                    }
-                                }
-                            }
-                        }
+                    break;
+                
+                case BiomeType::Desert:
+                    // Add a desert temple
+                    if ((cx + cz) % 5 == 0) {
+                        addTemple(chunk);
                     }
-                }
+                    break;
             }
             
             // Build the chunk mesh
@@ -267,7 +298,8 @@ void VoxelGame::generateTestWorld() {
     }
     
     // Set up chunk neighbors for proper face culling
-    for (const auto& chunk : m_Chunks) {
+    for (const auto& pair : m_Chunks) {
+        Chunk* chunk = pair.second;
         glm::ivec3 pos = chunk->getPosition();
         
         // Set neighbors for all directions
@@ -290,104 +322,385 @@ void VoxelGame::generateTestWorld() {
     }
     
     // Rebuild all chunk meshes now that neighbors are set
-    for (const auto& chunk : m_Chunks) {
-        chunk->buildMesh();
+    for (const auto& pair : m_Chunks) {
+        pair.second->buildMesh();
     }
 }
 
-void VoxelGame::setVoxel(int x, int y, int z, VoxelType type) {
-    glm::ivec3 chunkCoords = worldToChunkCoords(x, y, z);
-    glm::ivec3 localCoords = worldToLocalCoords(x, y, z);
+// Helper method to add trees to a chunk
+void VoxelGame::addTrees(Chunk* chunk, int count, int minHeight, int maxHeight) {
+    // Get the chunk's position for world coordinates
+    glm::ivec3 chunkPos = chunk->getPosition();
     
-    Chunk* chunk = getChunk(chunkCoords.x, chunkCoords.y, chunkCoords.z);
-    if (chunk) {
-        chunk->setVoxel(localCoords.x, localCoords.y, localCoords.z, type);
+    // Add the specified number of trees
+    for (int i = 0; i < count; i++) {
+        // Random position within the chunk
+        int x = rand() % Chunk::CHUNK_SIZE_X;
+        int z = rand() % Chunk::CHUNK_SIZE_Z;
+        
+        // Find the surface height at this position
+        int y = 0;
+        for (int testY = Chunk::CHUNK_SIZE_Y - 1; testY >= 0; testY--) {
+            VoxelType voxel = chunk->getVoxel(x, testY, z);
+            if (voxel != VoxelType::Air && voxel != VoxelType::Water) {
+                y = testY + 1;
+                break;
+            }
+        }
+        
+        // Skip if underwater
+        if (chunk->getVoxel(x, y, z) == VoxelType::Water) {
+            continue;
+        }
+        
+        // Random tree height within specified range
+        int treeHeight = minHeight + rand() % (maxHeight - minHeight + 1);
+        
+        // Tree trunk
+        for (int dy = 0; dy < treeHeight; dy++) {
+            if (y + dy < Chunk::CHUNK_SIZE_Y) {
+                chunk->setVoxel(x, y + dy, z, VoxelType::Wood);
+            }
+        }
+        
+        // Tree leaves
+        for (int dy = treeHeight - 3; dy < treeHeight + 2; dy++) {
+            for (int dx = -2; dx <= 2; dx++) {
+                for (int dz = -2; dz <= 2; dz++) {
+                    int lx = x + dx;
+                    int ly = y + dy;
+                    int lz = z + dz;
+                    
+                    // Skip if out of bounds
+                    if (lx < 0 || lx >= Chunk::CHUNK_SIZE_X || 
+                        ly < 0 || ly >= Chunk::CHUNK_SIZE_Y || 
+                        lz < 0 || lz >= Chunk::CHUNK_SIZE_Z) {
+                        continue;
+                    }
+                    
+                    // Add leaves in a sphere-like pattern
+                    float dist = sqrt(dx*dx + (dy-treeHeight+1)*(dy-treeHeight+1) + dz*dz);
+                    if (dist <= 2.5f) {
+                        // Skip the trunk
+                        if (!(dx == 0 && dz == 0 && dy < treeHeight)) {
+                            chunk->setVoxel(lx, ly, lz, VoxelType::Leaves);
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
-VoxelType VoxelGame::getVoxel(int x, int y, int z) const {
-    glm::ivec3 chunkCoords = worldToChunkCoords(x, y, z);
-    glm::ivec3 localCoords = worldToLocalCoords(x, y, z);
+// Helper method to add a house to a chunk
+void VoxelGame::addHouse(Chunk* chunk) {
+    // Find a suitable location for the house
+    int centerX = Chunk::CHUNK_SIZE_X / 2;
+    int centerZ = Chunk::CHUNK_SIZE_Z / 2;
     
-    Chunk* chunk = getChunk(chunkCoords.x, chunkCoords.y, chunkCoords.z);
-    if (chunk) {
-        return chunk->getVoxel(localCoords.x, localCoords.y, localCoords.z);
-    }
-    
-    return VoxelType::Air;
-}
-
-Chunk* VoxelGame::getChunk(int chunkX, int chunkY, int chunkZ) const {
-    for (const auto& chunk : m_Chunks) {
-        glm::ivec3 pos = chunk->getPosition();
-        if (pos.x == chunkX && pos.y == chunkY && pos.z == chunkZ) {
-            return chunk.get();
+    // Find the surface height at this position
+    int baseY = 0;
+    for (int y = Chunk::CHUNK_SIZE_Y - 1; y >= 0; y--) {
+        VoxelType voxel = chunk->getVoxel(centerX, y, centerZ);
+        if (voxel != VoxelType::Air && voxel != VoxelType::Water) {
+            baseY = y + 1;
+            break;
         }
     }
     
+    // Skip if underwater
+    if (chunk->getVoxel(centerX, baseY, centerZ) == VoxelType::Water) {
+        return;
+    }
+    
+    // House dimensions
+    int width = 5;
+    int depth = 6;
+    int height = 4;
+    
+    // Build the house walls
+    for (int y = baseY; y < baseY + height; y++) {
+        for (int x = centerX - width/2; x <= centerX + width/2; x++) {
+            for (int z = centerZ - depth/2; z <= centerZ + depth/2; z++) {
+                // Skip if out of bounds
+                if (x < 0 || x >= Chunk::CHUNK_SIZE_X || 
+                    y < 0 || y >= Chunk::CHUNK_SIZE_Y || 
+                    z < 0 || z >= Chunk::CHUNK_SIZE_Z) {
+                    continue;
+                }
+                
+                // Only build the walls (hollow inside)
+                if (x == centerX - width/2 || x == centerX + width/2 || 
+                    z == centerZ - depth/2 || z == centerZ + depth/2) {
+                    chunk->setVoxel(x, y, z, VoxelType::Wood);
+                }
+            }
+        }
+    }
+    
+    // Add a door
+    int doorX = centerX;
+    int doorZ = centerZ - depth/2;
+    chunk->setVoxel(doorX, baseY, doorZ, VoxelType::Air);
+    chunk->setVoxel(doorX, baseY + 1, doorZ, VoxelType::Air);
+    
+    // Add a roof (pyramid style)
+    for (int layer = 0; layer <= width/2 + 1; layer++) {
+        for (int x = centerX - width/2 + layer; x <= centerX + width/2 - layer; x++) {
+            for (int z = centerZ - depth/2 + layer; z <= centerZ + depth/2 - layer; z++) {
+                // Skip if out of bounds
+                if (x < 0 || x >= Chunk::CHUNK_SIZE_X || 
+                    baseY + height + layer >= Chunk::CHUNK_SIZE_Y || 
+                    z < 0 || z >= Chunk::CHUNK_SIZE_Z) {
+                    continue;
+                }
+                
+                chunk->setVoxel(x, baseY + height + layer, z, VoxelType::Wood);
+            }
+        }
+    }
+}
+
+// Helper method to add a tower to a chunk
+void VoxelGame::addTower(Chunk* chunk, bool isMountain) {
+    // Find a suitable location for the tower
+    int centerX = Chunk::CHUNK_SIZE_X / 2;
+    int centerZ = Chunk::CHUNK_SIZE_Z / 2;
+    
+    // Find the surface height at this position
+    int baseY = 0;
+    for (int y = Chunk::CHUNK_SIZE_Y - 1; y >= 0; y--) {
+        VoxelType voxel = chunk->getVoxel(centerX, y, centerZ);
+        if (voxel != VoxelType::Air && voxel != VoxelType::Water) {
+            baseY = y + 1;
+            break;
+        }
+    }
+    
+    // Skip if underwater
+    if (chunk->getVoxel(centerX, baseY, centerZ) == VoxelType::Water) {
+        return;
+    }
+    
+    // Tower dimensions
+    int width = 5;
+    int towerHeight = isMountain ? 12 : 8; // Taller on mountains
+    
+    // Build the tower
+    for (int y = baseY; y < baseY + towerHeight; y++) {
+        for (int x = centerX - width/2; x <= centerX + width/2; x++) {
+            for (int z = centerZ - width/2; z <= centerZ + width/2; z++) {
+                // Skip if out of bounds
+                if (x < 0 || x >= Chunk::CHUNK_SIZE_X || 
+                    y < 0 || y >= Chunk::CHUNK_SIZE_Y || 
+                    z < 0 || z >= Chunk::CHUNK_SIZE_Z) {
+                    continue;
+                }
+                
+                // Only build the walls (hollow inside)
+                if (x == centerX - width/2 || x == centerX + width/2 || 
+                    z == centerZ - width/2 || z == centerZ + width/2) {
+                    
+                    // Alternate stone and different materials for more visual interest
+                    if (y % 2 == 0) {
+                        chunk->setVoxel(x, y, z, VoxelType::Stone);
+                    } else {
+                        chunk->setVoxel(x, y, z, VoxelType::Sand);
+                    }
+                    
+                    // Add windows
+                    if (y % 3 == 0 && y > baseY + 1 && 
+                        ((x == centerX && (z == centerZ - width/2 || z == centerZ + width/2)) ||
+                         (z == centerZ && (x == centerX - width/2 || x == centerX + width/2)))) {
+                        chunk->setVoxel(x, y, z, VoxelType::Air);
+                    }
+                }
+            }
+        }
+    }
+    
+    // Add battlements on top
+    for (int x = centerX - width/2; x <= centerX + width/2; x++) {
+        for (int z = centerZ - width/2; z <= centerZ + width/2; z++) {
+            // Skip if out of bounds
+            if (x < 0 || x >= Chunk::CHUNK_SIZE_X || 
+                baseY + towerHeight >= Chunk::CHUNK_SIZE_Y || 
+                z < 0 || z >= Chunk::CHUNK_SIZE_Z) {
+                continue;
+            }
+            
+            // Only on the edges
+            if (x == centerX - width/2 || x == centerX + width/2 || 
+                z == centerZ - width/2 || z == centerZ + width/2) {
+                
+                // Alternating pattern for battlements
+                if ((x + z) % 2 == 0) {
+                    chunk->setVoxel(x, baseY + towerHeight, z, VoxelType::Stone);
+                }
+            }
+        }
+    }
+}
+
+// Helper method to add a desert temple to a chunk
+void VoxelGame::addTemple(Chunk* chunk) {
+    // Find a suitable location for the temple
+    int centerX = Chunk::CHUNK_SIZE_X / 2;
+    int centerZ = Chunk::CHUNK_SIZE_Z / 2;
+    
+    // Find the surface height at this position
+    int baseY = 0;
+    for (int y = Chunk::CHUNK_SIZE_Y - 1; y >= 0; y--) {
+        VoxelType voxel = chunk->getVoxel(centerX, y, centerZ);
+        if (voxel != VoxelType::Air && voxel != VoxelType::Water) {
+            baseY = y + 1;
+            break;
+        }
+    }
+    
+    // Skip if underwater
+    if (chunk->getVoxel(centerX, baseY, centerZ) == VoxelType::Water) {
+        return;
+    }
+    
+    // Temple dimensions
+    int width = 9;
+    int height = 6;
+    
+    // Build the base platform
+    for (int y = baseY; y < baseY + 1; y++) {
+        for (int x = centerX - width/2; x <= centerX + width/2; x++) {
+            for (int z = centerZ - width/2; z <= centerZ + width/2; z++) {
+                // Skip if out of bounds
+                if (x < 0 || x >= Chunk::CHUNK_SIZE_X || 
+                    y < 0 || y >= Chunk::CHUNK_SIZE_Y || 
+                    z < 0 || z >= Chunk::CHUNK_SIZE_Z) {
+                    continue;
+                }
+                
+                chunk->setVoxel(x, y, z, VoxelType::Sand);
+            }
+        }
+    }
+    
+    // Build pyramid layers
+    for (int layer = 0; layer < height; layer++) {
+        for (int x = centerX - width/2 + layer; x <= centerX + width/2 - layer; x++) {
+            for (int z = centerZ - width/2 + layer; z <= centerZ + width/2 - layer; z++) {
+                // Skip if out of bounds
+                if (x < 0 || x >= Chunk::CHUNK_SIZE_X || 
+                    baseY + 1 + layer >= Chunk::CHUNK_SIZE_Y || 
+                    z < 0 || z >= Chunk::CHUNK_SIZE_Z) {
+                    continue;
+                }
+                
+                // Only build the outer layer
+                if (layer == height - 1 || x == centerX - width/2 + layer || x == centerX + width/2 - layer || 
+                    z == centerZ - width/2 + layer || z == centerZ + width/2 - layer) {
+                    chunk->setVoxel(x, baseY + 1 + layer, z, VoxelType::Sand);
+                }
+            }
+        }
+    }
+    
+    // Add an entrance
+    int entranceWidth = 2;
+    for (int x = centerX - entranceWidth/2; x <= centerX + entranceWidth/2; x++) {
+        for (int y = baseY + 1; y < baseY + 4; y++) {
+            // Skip if out of bounds
+            if (x < 0 || x >= Chunk::CHUNK_SIZE_X || 
+                y >= Chunk::CHUNK_SIZE_Y || 
+                centerZ - width/2 < 0 || centerZ - width/2 >= Chunk::CHUNK_SIZE_Z) {
+                continue;
+            }
+            
+            chunk->setVoxel(x, y, centerZ - width/2, VoxelType::Air);
+        }
+    }
+}
+
+uint64_t VoxelGame::getChunkKey(int x, int y, int z) const {
+    // Create a unique key from the chunk coordinates
+    // This allows for a 21-bit range for each coordinate (enough for -1,048,576 to 1,048,575)
+    return ((uint64_t)(x & 0x1FFFFF)) | 
+           ((uint64_t)(y & 0x1FFFFF) << 21) | 
+           ((uint64_t)(z & 0x1FFFFF) << 42);
+}
+
+Chunk* VoxelGame::getChunk(int chunkX, int chunkY, int chunkZ) const {
+    uint64_t key = getChunkKey(chunkX, chunkY, chunkZ);
+    auto it = m_Chunks.find(key);
+    if (it != m_Chunks.end()) {
+        return it->second;
+    }
     return nullptr;
 }
 
 Chunk* VoxelGame::getOrCreateChunk(int chunkX, int chunkY, int chunkZ) {
-    // Try to find existing chunk
-    Chunk* existingChunk = getChunk(chunkX, chunkY, chunkZ);
-    if (existingChunk) {
-        return existingChunk;
+    uint64_t key = getChunkKey(chunkX, chunkY, chunkZ);
+    
+    // Check if chunk already exists
+    auto it = m_Chunks.find(key);
+    if (it != m_Chunks.end()) {
+        return it->second;
     }
     
-    // Create new chunk
-    glm::ivec3 chunkPos(chunkX, chunkY, chunkZ);
-    auto chunk = std::make_unique<Chunk>(chunkPos);
-    m_Chunks.push_back(std::move(chunk));
+    // Create a new chunk
+    Chunk* chunk = new Chunk(glm::ivec3(chunkX, chunkY, chunkZ));
+    m_Chunks[key] = chunk;
     
-    return m_Chunks.back().get();
+    return chunk;
+}
+
+void VoxelGame::setVoxel(int x, int y, int z, VoxelType type) {
+    // Convert world coordinates to chunk coordinates
+    glm::ivec3 chunkCoords = worldToChunkCoords(x, y, z);
+    
+    // Get or create the chunk
+    Chunk* chunk = getOrCreateChunk(chunkCoords.x, chunkCoords.y, chunkCoords.z);
+    
+    // Convert world coordinates to local coordinates
+    glm::ivec3 localCoords = worldToLocalCoords(x, y, z);
+    
+    // Set the voxel in the chunk
+    chunk->setVoxel(localCoords.x, localCoords.y, localCoords.z, type);
+}
+
+VoxelType VoxelGame::getVoxel(int x, int y, int z) const {
+    // Convert world coordinates to chunk coordinates
+    glm::ivec3 chunkCoords = worldToChunkCoords(x, y, z);
+    
+    // Get the chunk
+    Chunk* chunk = getChunk(chunkCoords.x, chunkCoords.y, chunkCoords.z);
+    if (!chunk) {
+        return VoxelType::Air;
+    }
+    
+    // Convert world coordinates to local coordinates
+    glm::ivec3 localCoords = worldToLocalCoords(x, y, z);
+    
+    // Get the voxel from the chunk
+    return chunk->getVoxel(localCoords.x, localCoords.y, localCoords.z);
 }
 
 glm::ivec3 VoxelGame::worldToChunkCoords(int x, int y, int z) const {
-    return glm::ivec3(
-        std::floor(static_cast<float>(x) / Chunk::CHUNK_SIZE_X),
-        std::floor(static_cast<float>(y) / Chunk::CHUNK_SIZE_Y),
-        std::floor(static_cast<float>(z) / Chunk::CHUNK_SIZE_Z)
-    );
+    // Convert world coordinates to chunk coordinates
+    // Uses integer division to floor the values
+    int chunkX = x >= 0 ? x / Chunk::CHUNK_SIZE_X : (x - Chunk::CHUNK_SIZE_X + 1) / Chunk::CHUNK_SIZE_X;
+    int chunkY = y >= 0 ? y / Chunk::CHUNK_SIZE_Y : (y - Chunk::CHUNK_SIZE_Y + 1) / Chunk::CHUNK_SIZE_Y;
+    int chunkZ = z >= 0 ? z / Chunk::CHUNK_SIZE_Z : (z - Chunk::CHUNK_SIZE_Z + 1) / Chunk::CHUNK_SIZE_Z;
+    
+    return glm::ivec3(chunkX, chunkY, chunkZ);
 }
 
 glm::ivec3 VoxelGame::worldToLocalCoords(int x, int y, int z) const {
-    // Use modulo to get local coordinates
-    // We need to handle negative coordinates correctly
-    int localX = ((x % Chunk::CHUNK_SIZE_X) + Chunk::CHUNK_SIZE_X) % Chunk::CHUNK_SIZE_X;
-    int localY = ((y % Chunk::CHUNK_SIZE_Y) + Chunk::CHUNK_SIZE_Y) % Chunk::CHUNK_SIZE_Y;
-    int localZ = ((z % Chunk::CHUNK_SIZE_Z) + Chunk::CHUNK_SIZE_Z) % Chunk::CHUNK_SIZE_Z;
+    // Convert world coordinates to local coordinates within a chunk
+    // Uses modulo to get the local offset
+    int localX = x >= 0 ? x % Chunk::CHUNK_SIZE_X : (x % Chunk::CHUNK_SIZE_X + Chunk::CHUNK_SIZE_X) % Chunk::CHUNK_SIZE_X;
+    int localY = y >= 0 ? y % Chunk::CHUNK_SIZE_Y : (y % Chunk::CHUNK_SIZE_Y + Chunk::CHUNK_SIZE_Y) % Chunk::CHUNK_SIZE_Y;
+    int localZ = z >= 0 ? z % Chunk::CHUNK_SIZE_Z : (z % Chunk::CHUNK_SIZE_Z + Chunk::CHUNK_SIZE_Z) % Chunk::CHUNK_SIZE_Z;
     
     return glm::ivec3(localX, localY, localZ);
-}
-
-void VoxelGame::takeScreenshot() {
-    // Use a path we know exists - current directory
-    std::string screenshotDir = "./screenshots/";
-    
-    // Create screenshots directory if it doesn't exist
-    std::filesystem::create_directories(screenshotDir);
-    
-    // Generate a filename with timestamp
-    auto now = std::chrono::system_clock::now();
-    auto time = std::chrono::system_clock::to_time_t(now);
-    std::stringstream ss;
-    ss << screenshotDir << "screenshot_" 
-       << std::put_time(std::localtime(&time), "%Y%m%d_%H%M%S") 
-       << "_" << (m_ScreenshotCounter++) << ".bmp";
-    
-    std::string filename = ss.str();
-    
-    // Print current directory for debugging
-    std::cout << "Current directory: " << std::filesystem::current_path() << std::endl;
-    std::cout << "Saving screenshot to: " << std::filesystem::absolute(filename) << std::endl;
-    
-    // Capture screenshot
-    if (Screenshot::capture(filename)) {
-        std::cout << "Screenshot saved: " << filename << std::endl;
-    } else {
-        std::cerr << "Failed to save screenshot" << std::endl;
-    }
 }
 
 } // namespace VoxelEngine 

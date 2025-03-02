@@ -41,36 +41,60 @@ void VoxelGame::onInit() {
     m_Camera.setPosition(glm::vec3(32.0f, 32.0f, 32.0f));
     m_Camera.setRotation(-45.0f, -30.0f);
     
+    // Hide cursor for better first-person navigation
+    m_Window->disableCursor();
+    
     // Generate test world
     generateTestWorld();
+
+    m_FirstMouse = true;
 }
 
 void VoxelGame::onUpdate(float deltaTime) {
     // Handle camera movement
     // Forward/backward
-    if (isKeyPressed(GLFW_KEY_W)) {
+    if (m_Window->isKeyPressed(GLFW_KEY_W)) {
         m_Camera.moveForward(10.0f * deltaTime);
     }
-    if (isKeyPressed(GLFW_KEY_S)) {
+    if (m_Window->isKeyPressed(GLFW_KEY_S)) {
         m_Camera.moveForward(-10.0f * deltaTime);
     }
     
     // Left/right
-    if (isKeyPressed(GLFW_KEY_A)) {
+    if (m_Window->isKeyPressed(GLFW_KEY_A)) {
         m_Camera.moveRight(-10.0f * deltaTime);
     }
-    if (isKeyPressed(GLFW_KEY_D)) {
+    if (m_Window->isKeyPressed(GLFW_KEY_D)) {
         m_Camera.moveRight(10.0f * deltaTime);
     }
     
     // Up/down
-    if (isKeyPressed(GLFW_KEY_SPACE)) {
+    if (m_Window->isKeyPressed(GLFW_KEY_SPACE)) {
         m_Camera.moveUp(10.0f * deltaTime);
     }
-    if (isKeyPressed(GLFW_KEY_LEFT_SHIFT)) {
+    if (m_Window->isKeyPressed(GLFW_KEY_LEFT_SHIFT)) {
         m_Camera.moveUp(-10.0f * deltaTime);
     }
     
+    // Process mouse input for camera look
+    double xpos, ypos;
+    m_Window->getCursorPosition(xpos, ypos);
+    
+    if (m_FirstMouse) {
+        m_LastMouseX = xpos;
+        m_LastMouseY = ypos;
+        m_FirstMouse = false;
+    }
+    
+    double xoffset = xpos - m_LastMouseX;
+    double yoffset = m_LastMouseY - ypos; // Reversed since y-coordinates go from bottom to top
+    
+    m_LastMouseX = xpos;
+    m_LastMouseY = ypos;
+    
+    // Rotate camera based on mouse movement
+    m_Camera.processMouseMovement(static_cast<float>(xoffset), static_cast<float>(yoffset));
+
     // Update camera
     m_Camera.update(deltaTime);
     
@@ -81,9 +105,12 @@ void VoxelGame::onUpdate(float deltaTime) {
     }
     
     // Toggle screenshot on F2
-    if (isKeyPressed(GLFW_KEY_F2) && !isKeyPressedLastFrame(GLFW_KEY_F2)) {
+    static bool wasF2Pressed = false;
+    bool isF2Pressed = m_Window->isKeyPressed(GLFW_KEY_F2);
+    if (isF2Pressed && !wasF2Pressed) {
         m_TakeScreenshotNextFrame = true;
     }
+    wasF2Pressed = isF2Pressed;
 }
 
 void VoxelGame::onRender() {
@@ -118,7 +145,7 @@ void VoxelGame::takeScreenshot() {
     m_ScreenshotCounter++;
     
     // Save the screenshot
-    saveScreenshot(filename);
+    Screenshot::capture(filename);
     
     std::cout << "Screenshot saved to " << filename << std::endl;
 }
@@ -701,6 +728,51 @@ glm::ivec3 VoxelGame::worldToLocalCoords(int x, int y, int z) const {
     int localZ = z >= 0 ? z % Chunk::CHUNK_SIZE_Z : (z % Chunk::CHUNK_SIZE_Z + Chunk::CHUNK_SIZE_Z) % Chunk::CHUNK_SIZE_Z;
     
     return glm::ivec3(localX, localY, localZ);
+}
+
+void VoxelGame::onKeyPressed(int key) {
+    // Handle key press events
+    if (key == GLFW_KEY_F2) {
+        m_TakeScreenshotNextFrame = true;
+    }
+}
+
+void VoxelGame::onWindowResized(int width, int height) {
+    // Update viewport and camera aspect ratio
+    m_WindowWidth = width;
+    m_WindowHeight = height;
+    
+    // Update camera projection matrix
+    m_Camera.setProjectionMatrix(45.0f, static_cast<float>(width) / height, 0.1f, 1000.0f);
+    
+    // Update OpenGL viewport
+    glViewport(0, 0, width, height);
+}
+
+void VoxelGame::init(int windowWidth, int windowHeight, const std::string& title) {
+    // Store window dimensions
+    m_WindowWidth = windowWidth;
+    m_WindowHeight = windowHeight;
+    
+    // Initialize member variables
+    m_Running = true;
+    m_LastFrameTime = 0.0f;
+    m_DeltaTime = 0.0f;
+    m_FirstMouse = true;
+    m_LastMouseX = windowWidth / 2.0f;
+    m_LastMouseY = windowHeight / 2.0f;
+    m_WireframeMode = false;
+    
+    // Create screenshots directory if it doesn't exist
+    std::filesystem::create_directory(m_ScreenshotPath);
+}
+
+void VoxelGame::run() {
+    // Initialize the game
+    init(1600, 900, "Voxel Game with Greedy Meshing");
+    
+    // Run the application
+    Application::run();
 }
 
 } // namespace VoxelEngine 

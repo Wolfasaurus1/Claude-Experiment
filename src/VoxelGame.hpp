@@ -29,7 +29,6 @@ protected:
     
     // Input event handlers
     void onKeyPressed(int key) override;
-    void onMouseMoved(double xPos, double yPos) override;
     void onWindowResized(int width, int height) override;
     
 private:

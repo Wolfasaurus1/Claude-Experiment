@@ -11,7 +11,7 @@
 namespace VoxelEngine {
 
 VoxelGame::VoxelGame()
-    : Application("Voxel Game", 1280, 720)
+    : Application("Voxel Game with Greedy Meshing", 1600, 900)
 {
 }
 

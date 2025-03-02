@@ -6,6 +6,8 @@
 #include <vector>
 #include <unordered_map>
 #include <glm/glm.hpp>
+#include <array>
+#include <functional>
 
 namespace VoxelEngine {
 
@@ -36,6 +38,14 @@ struct VoxelFace {
     glm::ivec3 position;
 };
 
+// Structure to hold information about a merged face
+struct MergedFace {
+    VoxelFace::Direction direction;
+    VoxelType type;
+    glm::ivec3 start; // Starting position of the merged face
+    glm::ivec2 size;  // Size of the merged face (width, height)
+};
+
 class VoxelRenderer {
 public:
     VoxelRenderer();
@@ -54,8 +64,14 @@ public:
     // Clear all voxel faces
     void clear();
     
-    // Build the mesh from all added faces
+    // Build the mesh from all added faces (naive approach)
     void buildMesh();
+    
+    // Build the mesh using greedy meshing algorithm
+    void buildGreedyMesh(int chunkSizeX, int chunkSizeY, int chunkSizeZ, 
+                         const std::function<VoxelType(int, int, int)>& getVoxelFunc,
+                         const std::function<bool(int, int, int, VoxelFace::Direction)>& shouldRenderFaceFunc,
+                         const glm::ivec3& chunkPos);
     
     // Render the voxel mesh
     void render(const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix);
@@ -67,6 +83,9 @@ private:
     // Generate vertices for a voxel face
     std::vector<Vertex> generateFaceVertices(const VoxelFace& face) const;
     
+    // Generate vertices for a merged face
+    std::vector<Vertex> generateMergedFaceVertices(const MergedFace& face) const;
+    
     // Generate indices for a voxel face
     std::vector<unsigned int> generateFaceIndices(unsigned int baseIndex) const;
     
@@ -76,6 +95,7 @@ private:
     std::vector<Vertex> m_Vertices;
     std::vector<unsigned int> m_Indices;
     std::vector<VoxelFace> m_Faces;
+    std::vector<MergedFace> m_MergedFaces;
     
     // Cache for voxel colors
     std::unordered_map<VoxelType, glm::vec4> m_ColorCache;

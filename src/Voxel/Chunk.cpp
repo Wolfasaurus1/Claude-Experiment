@@ -1,4 +1,5 @@
 #include "Chunk.hpp"
+#include <iostream>
 
 namespace VoxelEngine {
 
@@ -41,55 +42,21 @@ bool Chunk::isValidPosition(int x, int y, int z) const {
 }
 
 void Chunk::buildMesh() {
-    m_Renderer->clear();
-    
-    // Loop through all voxels in the chunk
-    for (int y = 0; y < CHUNK_SIZE_Y; y++) {
-        for (int z = 0; z < CHUNK_SIZE_Z; z++) {
-            for (int x = 0; x < CHUNK_SIZE_X; x++) {
-                VoxelType type = getVoxel(x, y, z);
-                
-                // Skip air voxels
-                if (type == VoxelType::Air) {
-                    continue;
-                }
-                
-                // Check each face
-                if (shouldRenderFace(x, y, z, VoxelFace::Direction::Front)) {
-                    VoxelFace face = { VoxelFace::Direction::Front, type, glm::ivec3(x, y, z) + m_Position * glm::ivec3(CHUNK_SIZE_X, 0, CHUNK_SIZE_Z) };
-                    m_Renderer->addFace(face);
-                }
-                
-                if (shouldRenderFace(x, y, z, VoxelFace::Direction::Back)) {
-                    VoxelFace face = { VoxelFace::Direction::Back, type, glm::ivec3(x, y, z) + m_Position * glm::ivec3(CHUNK_SIZE_X, 0, CHUNK_SIZE_Z) };
-                    m_Renderer->addFace(face);
-                }
-                
-                if (shouldRenderFace(x, y, z, VoxelFace::Direction::Top)) {
-                    VoxelFace face = { VoxelFace::Direction::Top, type, glm::ivec3(x, y, z) + m_Position * glm::ivec3(CHUNK_SIZE_X, 0, CHUNK_SIZE_Z) };
-                    m_Renderer->addFace(face);
-                }
-                
-                if (shouldRenderFace(x, y, z, VoxelFace::Direction::Bottom)) {
-                    VoxelFace face = { VoxelFace::Direction::Bottom, type, glm::ivec3(x, y, z) + m_Position * glm::ivec3(CHUNK_SIZE_X, 0, CHUNK_SIZE_Z) };
-                    m_Renderer->addFace(face);
-                }
-                
-                if (shouldRenderFace(x, y, z, VoxelFace::Direction::Right)) {
-                    VoxelFace face = { VoxelFace::Direction::Right, type, glm::ivec3(x, y, z) + m_Position * glm::ivec3(CHUNK_SIZE_X, 0, CHUNK_SIZE_Z) };
-                    m_Renderer->addFace(face);
-                }
-                
-                if (shouldRenderFace(x, y, z, VoxelFace::Direction::Left)) {
-                    VoxelFace face = { VoxelFace::Direction::Left, type, glm::ivec3(x, y, z) + m_Position * glm::ivec3(CHUNK_SIZE_X, 0, CHUNK_SIZE_Z) };
-                    m_Renderer->addFace(face);
-                }
-            }
-        }
+    if (!m_Renderer) {
+        m_Renderer = std::make_unique<VoxelRenderer>();
     }
-    
-    // Build the mesh
-    m_Renderer->buildMesh();
+
+    // Create lambda functions to pass to the renderer
+    auto getVoxelFunc = [this](int x, int y, int z) {
+        return getVoxel(x, y, z);
+    };
+
+    auto shouldRenderFaceFunc = [this](int x, int y, int z, VoxelFace::Direction direction) {
+        return shouldRenderFace(x, y, z, direction);
+    };
+
+    // Use greedy meshing instead of naive approach
+    m_Renderer->buildGreedyMesh(CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z, getVoxelFunc, shouldRenderFaceFunc, m_Position);
 }
 
 void Chunk::render(const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix) {

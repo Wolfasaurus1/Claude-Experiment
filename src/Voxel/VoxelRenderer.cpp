@@ -134,6 +134,195 @@ void VoxelRenderer::buildMesh() {
     std::cout << "Created mesh with " << m_Vertices.size() << " vertices and " << m_Indices.size() << " indices" << std::endl;
 }
 
+void VoxelRenderer::buildGreedyMesh(int chunkSizeX, int chunkSizeY, int chunkSizeZ, 
+                                   const std::function<VoxelType(int, int, int)>& getVoxelFunc,
+                                   const std::function<bool(int, int, int, VoxelFace::Direction)>& shouldRenderFaceFunc,
+                                   const glm::ivec3& chunkPos) {
+    // Clear any existing mesh data
+    m_Faces.clear();
+    m_MergedFaces.clear();
+    m_Vertices.clear();
+    m_Indices.clear();
+    
+    // For performance tracking
+    int totalFacesBeforeMerging = 0;
+    int totalFacesAfterMerging = 0;
+    
+    // We'll process each direction separately
+    for (int faceDir = 0; faceDir < 6; faceDir++) {
+        VoxelFace::Direction direction = static_cast<VoxelFace::Direction>(faceDir);
+        
+        // Determine which dimensions to iterate based on the current face direction
+        int dimU, dimV, dimW; // dimW is perpendicular to the face
+        
+        switch (direction) {
+            case VoxelFace::Direction::Front:  // +Z
+            case VoxelFace::Direction::Back:   // -Z
+                dimU = 0; dimV = 1; dimW = 2; // X, Y, Z
+                break;
+            case VoxelFace::Direction::Top:    // +Y
+            case VoxelFace::Direction::Bottom: // -Y
+                dimU = 0; dimV = 2; dimW = 1; // X, Z, Y
+                break;
+            case VoxelFace::Direction::Right:  // +X
+            case VoxelFace::Direction::Left:   // -X
+                dimU = 2; dimV = 1; dimW = 0; // Z, Y, X
+                break;
+        }
+        
+        // Get the dimensions of the chunk
+        int uSize, vSize, wSize;
+        switch (dimU) {
+            case 0: uSize = chunkSizeX; break;
+            case 1: uSize = chunkSizeY; break;
+            case 2: uSize = chunkSizeZ; break;
+        }
+        switch (dimV) {
+            case 0: vSize = chunkSizeX; break;
+            case 1: vSize = chunkSizeY; break;
+            case 2: vSize = chunkSizeZ; break;
+        }
+        switch (dimW) {
+            case 0: wSize = chunkSizeX; break;
+            case 1: wSize = chunkSizeY; break;
+            case 2: wSize = chunkSizeZ; break;
+        }
+        
+        // For each layer (perpendicular to the face direction)
+        for (int w = 0; w < wSize; w++) {
+            // Create a mask for the current slice
+            std::vector<std::vector<bool>> mask(vSize, std::vector<bool>(uSize, false));
+            std::vector<std::vector<VoxelType>> types(vSize, std::vector<VoxelType>(uSize, VoxelType::Air));
+            
+            // Fill the mask for the current slice
+            for (int v = 0; v < vSize; v++) {
+                for (int u = 0; u < uSize; u++) {
+                    // Convert from uvw coordinates to xyz coordinates
+                    int x, y, z;
+                    switch (dimU) {
+                        case 0: x = u; break;
+                        case 1: y = u; break;
+                        case 2: z = u; break;
+                    }
+                    switch (dimV) {
+                        case 0: x = v; break;
+                        case 1: y = v; break;
+                        case 2: z = v; break;
+                    }
+                    switch (dimW) {
+                        case 0: x = w; break;
+                        case 1: y = w; break;
+                        case 2: z = w; break;
+                    }
+                    
+                    // Check if a face should be rendered at this position
+                    if (shouldRenderFaceFunc(x, y, z, direction)) {
+                        mask[v][u] = true;
+                        types[v][u] = getVoxelFunc(x, y, z);
+                        totalFacesBeforeMerging++;
+                    }
+                }
+            }
+            
+            // Now, greedily find rectangles in the mask
+            for (int v = 0; v < vSize; v++) {
+                for (int u = 0; u < uSize; u++) {
+                    if (mask[v][u]) {
+                        // Found an unprocessed face, try to expand it
+                        VoxelType currentType = types[v][u];
+                        
+                        // Find the width (extend in u direction)
+                        int width = 1;
+                        while (u + width < uSize && 
+                               mask[v][u + width] && 
+                               types[v][u + width] == currentType) {
+                            width++;
+                        }
+                        
+                        // Find the height (extend in v direction)
+                        int height = 1;
+                        bool canExtend = true;
+                        
+                        while (canExtend && v + height < vSize) {
+                            // Check if we can extend the entire width
+                            for (int du = 0; du < width; du++) {
+                                if (!mask[v + height][u + du] || 
+                                    types[v + height][u + du] != currentType) {
+                                    canExtend = false;
+                                    break;
+                                }
+                            }
+                            
+                            if (canExtend) {
+                                height++;
+                            }
+                        }
+                        
+                        // Create a merged face
+                        MergedFace mergedFace;
+                        mergedFace.direction = direction;
+                        mergedFace.type = currentType;
+                        
+                        // Convert from uvw to xyz for the starting position
+                        glm::ivec3 start(0, 0, 0);
+                        switch (dimU) {
+                            case 0: start.x = u; break;
+                            case 1: start.y = u; break;
+                            case 2: start.z = u; break;
+                        }
+                        switch (dimV) {
+                            case 0: start.x = v; break;
+                            case 1: start.y = v; break;
+                            case 2: start.z = v; break;
+                        }
+                        switch (dimW) {
+                            case 0: start.x = w; break;
+                            case 1: start.y = w; break;
+                            case 2: start.z = w; break;
+                        }
+                        
+                        // Set the start position and size
+                        mergedFace.start = start + chunkPos * glm::ivec3(chunkSizeX, 0, chunkSizeZ);
+                        mergedFace.size = glm::ivec2(width, height);
+                        
+                        // Add the merged face
+                        m_MergedFaces.push_back(mergedFace);
+                        totalFacesAfterMerging++;
+                        
+                        // Mark the merged area as processed
+                        for (int dv = 0; dv < height; dv++) {
+                            for (int du = 0; du < width; du++) {
+                                mask[v + dv][u + du] = false;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Generate vertices and indices for all merged faces
+    unsigned int baseIndex = 0;
+    for (const auto& face : m_MergedFaces) {
+        std::vector<Vertex> faceVertices = generateMergedFaceVertices(face);
+        m_Vertices.insert(m_Vertices.end(), faceVertices.begin(), faceVertices.end());
+        
+        std::vector<unsigned int> faceIndices = generateFaceIndices(baseIndex);
+        m_Indices.insert(m_Indices.end(), faceIndices.begin(), faceIndices.end());
+        
+        baseIndex += 4; // Each face still has 4 vertices
+    }
+    
+    // Create mesh
+    m_Mesh = std::make_unique<Mesh>(m_Vertices, m_Indices);
+    
+    // Print statistics
+    std::cout << "Greedy meshing: " << totalFacesBeforeMerging << " faces reduced to " 
+              << totalFacesAfterMerging << " (" 
+              << (totalFacesBeforeMerging > 0 ? (100 - totalFacesAfterMerging * 100 / totalFacesBeforeMerging) : 0) 
+              << "% reduction)" << std::endl;
+}
+
 void VoxelRenderer::render(const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix) {
     if (!m_Mesh || !m_Shader) {
         return;
@@ -245,6 +434,62 @@ std::vector<unsigned int> VoxelRenderer::generateFaceIndices(unsigned int baseIn
         baseIndex, baseIndex + 1, baseIndex + 2,
         baseIndex, baseIndex + 2, baseIndex + 3
     };
+}
+
+std::vector<Vertex> VoxelRenderer::generateMergedFaceVertices(const MergedFace& face) const {
+    float x = static_cast<float>(face.start.x) * m_VoxelSize;
+    float y = static_cast<float>(face.start.y) * m_VoxelSize;
+    float z = static_cast<float>(face.start.z) * m_VoxelSize;
+    
+    float width = static_cast<float>(face.size.x) * m_VoxelSize;
+    float height = static_cast<float>(face.size.y) * m_VoxelSize;
+    
+    glm::vec4 color = getVoxelColor(face.type);
+    
+    std::vector<Vertex> vertices(4);
+    
+    // Set normals and positions based on face direction
+    // Use the size of the merged face for the dimensions
+    switch (face.direction) {
+        case VoxelFace::Direction::Front: // +Z
+            vertices[0] = { glm::vec3(x,         y,          z + m_VoxelSize), glm::vec3(0, 0, 1), glm::vec2(0, 0), color };
+            vertices[1] = { glm::vec3(x + width, y,          z + m_VoxelSize), glm::vec3(0, 0, 1), glm::vec2(1, 0), color };
+            vertices[2] = { glm::vec3(x + width, y + height, z + m_VoxelSize), glm::vec3(0, 0, 1), glm::vec2(1, 1), color };
+            vertices[3] = { glm::vec3(x,         y + height, z + m_VoxelSize), glm::vec3(0, 0, 1), glm::vec2(0, 1), color };
+            break;
+        case VoxelFace::Direction::Back: // -Z
+            vertices[0] = { glm::vec3(x,         y,          z), glm::vec3(0, 0, -1), glm::vec2(0, 0), color };
+            vertices[1] = { glm::vec3(x,         y + height, z), glm::vec3(0, 0, -1), glm::vec2(0, 1), color };
+            vertices[2] = { glm::vec3(x + width, y + height, z), glm::vec3(0, 0, -1), glm::vec2(1, 1), color };
+            vertices[3] = { glm::vec3(x + width, y,          z), glm::vec3(0, 0, -1), glm::vec2(1, 0), color };
+            break;
+        case VoxelFace::Direction::Top: // +Y
+            vertices[0] = { glm::vec3(x,         y + m_VoxelSize, z        ), glm::vec3(0, 1, 0), glm::vec2(0, 0), color };
+            vertices[1] = { glm::vec3(x,         y + m_VoxelSize, z + width), glm::vec3(0, 1, 0), glm::vec2(0, 1), color };
+            vertices[2] = { glm::vec3(x + height, y + m_VoxelSize, z + width), glm::vec3(0, 1, 0), glm::vec2(1, 1), color };
+            vertices[3] = { glm::vec3(x + height, y + m_VoxelSize, z        ), glm::vec3(0, 1, 0), glm::vec2(1, 0), color };
+            break;
+        case VoxelFace::Direction::Bottom: // -Y
+            vertices[0] = { glm::vec3(x,         y, z        ), glm::vec3(0, -1, 0), glm::vec2(0, 0), color };
+            vertices[1] = { glm::vec3(x + height, y, z        ), glm::vec3(0, -1, 0), glm::vec2(1, 0), color };
+            vertices[2] = { glm::vec3(x + height, y, z + width), glm::vec3(0, -1, 0), glm::vec2(1, 1), color };
+            vertices[3] = { glm::vec3(x,         y, z + width), glm::vec3(0, -1, 0), glm::vec2(0, 1), color };
+            break;
+        case VoxelFace::Direction::Right: // +X
+            vertices[0] = { glm::vec3(x + m_VoxelSize, y,          z        ), glm::vec3(1, 0, 0), glm::vec2(0, 0), color };
+            vertices[1] = { glm::vec3(x + m_VoxelSize, y + height, z        ), glm::vec3(1, 0, 0), glm::vec2(0, 1), color };
+            vertices[2] = { glm::vec3(x + m_VoxelSize, y + height, z + width), glm::vec3(1, 0, 0), glm::vec2(1, 1), color };
+            vertices[3] = { glm::vec3(x + m_VoxelSize, y,          z + width), glm::vec3(1, 0, 0), glm::vec2(1, 0), color };
+            break;
+        case VoxelFace::Direction::Left: // -X
+            vertices[0] = { glm::vec3(x, y,          z + width), glm::vec3(-1, 0, 0), glm::vec2(0, 0), color };
+            vertices[1] = { glm::vec3(x, y,          z        ), glm::vec3(-1, 0, 0), glm::vec2(1, 0), color };
+            vertices[2] = { glm::vec3(x, y + height, z        ), glm::vec3(-1, 0, 0), glm::vec2(1, 1), color };
+            vertices[3] = { glm::vec3(x, y + height, z + width), glm::vec3(-1, 0, 0), glm::vec2(0, 1), color };
+            break;
+    }
+    
+    return vertices;
 }
 
 } // namespace VoxelEngine 

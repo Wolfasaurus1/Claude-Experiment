@@ -1,0 +1,40 @@
+# Build directories
+build/
+bin/
+lib/
+
+# Visual Studio files
+.vs/
+*.user
+*.suo
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.pdb
+*.idb
+*.ilk
+*.log
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CMakeSettings.json
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Screenshots (optional - remove if you want to track screenshots)
+# screenshots/
+
+# Cursor IDE files
+.cursor/ 

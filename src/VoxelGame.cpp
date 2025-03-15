@@ -36,7 +36,7 @@ void VoxelGame::onInit() {
     glEnable(GL_DEPTH_TEST);
     
     // Set clear color to sky blue
-    glClearColor(0.5f, 0.7f, 1.0f, 1.0f);
+    glClearColor(0.741,0.847,1, 1.0f);
     
     // Set initial camera position and rotation
     m_Camera.setPosition(glm::vec3(32.0f, 32.0f, 32.0f));
@@ -371,7 +371,7 @@ void VoxelGame::addSkyscraper(Chunk* chunk) {
     // Skyscraper base dimensions (randomized)
     int baseWidth = 6 + (rand() % 5); // Width between 6 and 10
     int baseDepth = 6 + (rand() % 5); // Depth between 6 and 10
-    int totalHeight = 20 + (rand() % 21); // Height between 20 and 40
+    int totalHeight = 20 + (rand() % 31); // Height between 20 and 40
     int sectionHeight = 5 + (rand() % 3); // Each section is 5-7 voxels tall
 
     int currentY = baseY;
@@ -394,7 +394,7 @@ void VoxelGame::addSkyscraper(Chunk* chunk) {
                     // Build only the walls (hollow inside)
                     if (x == centerX - currentWidth / 2 || x == centerX + currentWidth / 2 ||
                         z == centerZ - currentDepth / 2 || z == centerZ + currentDepth / 2) {
-                        chunk->setVoxel(x, y, z, VoxelType::Water); // Use Wood or another type
+                        chunk->setVoxel(x, y, z, VoxelType::Stone); // Use Wood or another type
                     }
                 }
             }
@@ -421,233 +421,6 @@ void VoxelGame::addSkyscraper(Chunk* chunk) {
                 }
                 chunk->setVoxel(x, baseY + totalHeight, z, VoxelType::Wood); // Flat roof
             }
-        }
-    }
-}
-
-// Helper method to add a house to a chunk
-void VoxelGame::addHouse(Chunk* chunk) {
-    // Find a suitable location for the house
-    int centerX = Chunk::CHUNK_SIZE_X / 2;
-    int centerZ = Chunk::CHUNK_SIZE_Z / 2;
-    
-    // Find the surface height at this position
-    int baseY = 0;
-    for (int y = Chunk::CHUNK_SIZE_Y - 1; y >= 0; y--) {
-        VoxelType voxel = chunk->getVoxel(centerX, y, centerZ);
-        if (voxel != VoxelType::Air && voxel != VoxelType::Water) {
-            baseY = y + 1;
-            break;
-        }
-    }
-    
-    // Skip if underwater
-    if (chunk->getVoxel(centerX, baseY, centerZ) == VoxelType::Water) {
-        return;
-    }
-    
-    // House dimensions
-    int width = 5;
-    int depth = 6;
-    int height = 4;
-    
-    // Build the house walls
-    for (int y = baseY; y < baseY + height; y++) {
-        for (int x = centerX - width/2; x <= centerX + width/2; x++) {
-            for (int z = centerZ - depth/2; z <= centerZ + depth/2; z++) {
-                // Skip if out of bounds
-                if (x < 0 || x >= Chunk::CHUNK_SIZE_X || 
-                    y < 0 || y >= Chunk::CHUNK_SIZE_Y || 
-                    z < 0 || z >= Chunk::CHUNK_SIZE_Z) {
-                    continue;
-                }
-                
-                // Only build the walls (hollow inside)
-                if (x == centerX - width/2 || x == centerX + width/2 || 
-                    z == centerZ - depth/2 || z == centerZ + depth/2) {
-                    chunk->setVoxel(x, y, z, VoxelType::Wood);
-                }
-            }
-        }
-    }
-    
-    // Add a door
-    int doorX = centerX;
-    int doorZ = centerZ - depth/2;
-    chunk->setVoxel(doorX, baseY, doorZ, VoxelType::Air);
-    chunk->setVoxel(doorX, baseY + 1, doorZ, VoxelType::Air);
-    
-    // Add a roof (pyramid style)
-    for (int layer = 0; layer <= width/2 + 1; layer++) {
-        for (int x = centerX - width/2 + layer; x <= centerX + width/2 - layer; x++) {
-            for (int z = centerZ - depth/2 + layer; z <= centerZ + depth/2 - layer; z++) {
-                // Skip if out of bounds
-                if (x < 0 || x >= Chunk::CHUNK_SIZE_X || 
-                    baseY + height + layer >= Chunk::CHUNK_SIZE_Y || 
-                    z < 0 || z >= Chunk::CHUNK_SIZE_Z) {
-                    continue;
-                }
-                
-                chunk->setVoxel(x, baseY + height + layer, z, VoxelType::Wood);
-            }
-        }
-    }
-}
-
-// Helper method to add a tower to a chunk
-void VoxelGame::addTower(Chunk* chunk, bool isMountain) {
-    // Find a suitable location for the tower
-    int centerX = Chunk::CHUNK_SIZE_X / 2;
-    int centerZ = Chunk::CHUNK_SIZE_Z / 2;
-    
-    // Find the surface height at this position
-    int baseY = 0;
-    for (int y = Chunk::CHUNK_SIZE_Y - 1; y >= 0; y--) {
-        VoxelType voxel = chunk->getVoxel(centerX, y, centerZ);
-        if (voxel != VoxelType::Air && voxel != VoxelType::Water) {
-            baseY = y + 1;
-            break;
-        }
-    }
-    
-    // Skip if underwater
-    if (chunk->getVoxel(centerX, baseY, centerZ) == VoxelType::Water) {
-        return;
-    }
-    
-    // Tower dimensions
-    int width = 5;
-    int towerHeight = isMountain ? 12 : 8; // Taller on mountains
-    
-    // Build the tower
-    for (int y = baseY; y < baseY + towerHeight; y++) {
-        for (int x = centerX - width/2; x <= centerX + width/2; x++) {
-            for (int z = centerZ - width/2; z <= centerZ + width/2; z++) {
-                // Skip if out of bounds
-                if (x < 0 || x >= Chunk::CHUNK_SIZE_X || 
-                    y < 0 || y >= Chunk::CHUNK_SIZE_Y || 
-                    z < 0 || z >= Chunk::CHUNK_SIZE_Z) {
-                    continue;
-                }
-                
-                // Only build the walls (hollow inside)
-                if (x == centerX - width/2 || x == centerX + width/2 || 
-                    z == centerZ - width/2 || z == centerZ + width/2) {
-                    
-                    // Alternate stone and different materials for more visual interest
-                    if (y % 2 == 0) {
-                        chunk->setVoxel(x, y, z, VoxelType::Stone);
-                    } else {
-                        chunk->setVoxel(x, y, z, VoxelType::Sand);
-                    }
-                    
-                    // Add windows
-                    if (y % 3 == 0 && y > baseY + 1 && 
-                        ((x == centerX && (z == centerZ - width/2 || z == centerZ + width/2)) ||
-                         (z == centerZ && (x == centerX - width/2 || x == centerX + width/2)))) {
-                        chunk->setVoxel(x, y, z, VoxelType::Air);
-                    }
-                }
-            }
-        }
-    }
-    
-    // Add battlements on top
-    for (int x = centerX - width/2; x <= centerX + width/2; x++) {
-        for (int z = centerZ - width/2; z <= centerZ + width/2; z++) {
-            // Skip if out of bounds
-            if (x < 0 || x >= Chunk::CHUNK_SIZE_X || 
-                baseY + towerHeight >= Chunk::CHUNK_SIZE_Y || 
-                z < 0 || z >= Chunk::CHUNK_SIZE_Z) {
-                continue;
-            }
-            
-            // Only on the edges
-            if (x == centerX - width/2 || x == centerX + width/2 || 
-                z == centerZ - width/2 || z == centerZ + width/2) {
-                
-                // Alternating pattern for battlements
-                if ((x + z) % 2 == 0) {
-                    chunk->setVoxel(x, baseY + towerHeight, z, VoxelType::Stone);
-                }
-            }
-        }
-    }
-}
-
-// Helper method to add a desert temple to a chunk
-void VoxelGame::addTemple(Chunk* chunk) {
-    // Find a suitable location for the temple
-    int centerX = Chunk::CHUNK_SIZE_X / 2;
-    int centerZ = Chunk::CHUNK_SIZE_Z / 2;
-    
-    // Find the surface height at this position
-    int baseY = 0;
-    for (int y = Chunk::CHUNK_SIZE_Y - 1; y >= 0; y--) {
-        VoxelType voxel = chunk->getVoxel(centerX, y, centerZ);
-        if (voxel != VoxelType::Air && voxel != VoxelType::Water) {
-            baseY = y + 1;
-            break;
-        }
-    }
-    
-    // Skip if underwater
-    if (chunk->getVoxel(centerX, baseY, centerZ) == VoxelType::Water) {
-        return;
-    }
-    
-    // Temple dimensions
-    int width = 9;
-    int height = 6;
-    
-    // Build the base platform
-    for (int y = baseY; y < baseY + 1; y++) {
-        for (int x = centerX - width/2; x <= centerX + width/2; x++) {
-            for (int z = centerZ - width/2; z <= centerZ + width/2; z++) {
-                // Skip if out of bounds
-                if (x < 0 || x >= Chunk::CHUNK_SIZE_X || 
-                    y < 0 || y >= Chunk::CHUNK_SIZE_Y || 
-                    z < 0 || z >= Chunk::CHUNK_SIZE_Z) {
-                    continue;
-                }
-                
-                chunk->setVoxel(x, y, z, VoxelType::Sand);
-            }
-        }
-    }
-    
-    // Build pyramid layers
-    for (int layer = 0; layer < height; layer++) {
-        for (int x = centerX - width/2 + layer; x <= centerX + width/2 - layer; x++) {
-            for (int z = centerZ - width/2 + layer; z <= centerZ + width/2 - layer; z++) {
-                // Skip if out of bounds
-                if (x < 0 || x >= Chunk::CHUNK_SIZE_X || 
-                    baseY + 1 + layer >= Chunk::CHUNK_SIZE_Y || 
-                    z < 0 || z >= Chunk::CHUNK_SIZE_Z) {
-                    continue;
-                }
-                
-                // Only build the outer layer
-                if (layer == height - 1 || x == centerX - width/2 + layer || x == centerX + width/2 - layer || 
-                    z == centerZ - width/2 + layer || z == centerZ + width/2 - layer) {
-                    chunk->setVoxel(x, baseY + 1 + layer, z, VoxelType::Sand);
-                }
-            }
-        }
-    }
-    
-    // Add an entrance
-    int entranceWidth = 2;
-    for (int x = centerX - entranceWidth/2; x <= centerX + entranceWidth/2; x++) {
-        for (int y = baseY + 1; y < baseY + 4; y++) {
-            // Skip if out of bounds
-            if (x < 0 || x >= Chunk::CHUNK_SIZE_X || 
-                y >= Chunk::CHUNK_SIZE_Y || 
-                centerZ - width/2 < 0 || centerZ - width/2 >= Chunk::CHUNK_SIZE_Z) {
-                continue;
-            }
-            
-            chunk->setVoxel(x, y, centerZ - width/2, VoxelType::Air);
         }
     }
 }

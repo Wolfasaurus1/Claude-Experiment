@@ -54,24 +54,30 @@ void VoxelRenderer::init() {
         uniform vec3 viewPos;
 
         void main() {
-            // Ambient
+            // Ambient: Lower intensity for a softer base lighting.
             float ambientStrength = 0.3;
             vec3 ambient = ambientStrength * lightColor;
             
-            // Diffuse
+            // Diffuse: Calculate using a normalized normal and light direction.
             vec3 norm = normalize(Normal);
             vec3 lightDirection = normalize(lightDir);
             float diff = max(dot(norm, lightDirection), 0.0);
             vec3 diffuse = diff * lightColor;
             
-            // Specular
-            float specularStrength = 0.1;
+            // Specular: Use a lower exponent and reduced intensity for softer highlights.
+            float specularStrength = 0.05;
             vec3 viewDir = normalize(viewPos - FragPos);
             vec3 reflectDir = reflect(-lightDirection, norm);
-            float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32);
+            float spec = pow(max(dot(viewDir, reflectDir), 0.0), 10);
             vec3 specular = specularStrength * spec * lightColor;
             
+            // Combine lighting with vertex color.
             vec3 result = (ambient + diffuse + specular) * Color.rgb;
+            
+            // Apply gamma correction for a more natural appearance.
+            float gamma = 2.2;
+            result = pow(result, vec3(1.0 / gamma));
+            
             FragColor = vec4(result, Color.a);
         }
     )";
@@ -80,12 +86,12 @@ void VoxelRenderer::init() {
     
     // Initialize color cache with alpha values
     m_ColorCache[VoxelType::Air] = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
-    m_ColorCache[VoxelType::Grass] = glm::vec4(0.4f, 0.8f, 0.2f, 1.0f);
+    m_ColorCache[VoxelType::Grass] = glm::vec4(0.063,0.192,0.243, 1.0f);
     m_ColorCache[VoxelType::Dirt] = glm::vec4(0.6f, 0.4f, 0.2f, 1.0f);
     m_ColorCache[VoxelType::Stone] = glm::vec4(0.7f, 0.7f, 0.7f, 1.0f);
     m_ColorCache[VoxelType::Sand] = glm::vec4(0.95f, 0.95f, 0.5f, 1.0f);
-    m_ColorCache[VoxelType::Water] = glm::vec4(0.2f, 0.5f, 0.9f, 0.7f); // Semi-transparent
-    m_ColorCache[VoxelType::Wood] = glm::vec4(0.5f, 0.3f, 0.1f, 1.0f);
+    m_ColorCache[VoxelType::Water] = glm::vec4(0.184,0.478,0.471, 0.7f); // Semi-transparent
+    m_ColorCache[VoxelType::Wood] = glm::vec4(0.275,0.573,0.502, 1.0f);
     m_ColorCache[VoxelType::Leaves] = glm::vec4(0.2f, 0.6f, 0.1f, 0.9f); // Semi-transparent
 }
 
@@ -346,8 +352,8 @@ void VoxelRenderer::render(const glm::mat4& viewMatrix, const glm::mat4& project
     m_Shader->setMat4("projection", projectionMatrix);
     
     // Set lighting uniforms
-    m_Shader->setVec3("lightDir", glm::normalize(glm::vec3(0.5f, 1.0f, 0.3f)));
-    m_Shader->setVec3("lightColor", glm::vec3(1.0f, 0.95f, 0.9f)); // Slightly warm sunlight color
+    m_Shader->setVec3("lightDir", glm::normalize(glm::vec3(1.0f, 2.0f, 3.0f)));
+    m_Shader->setVec3("lightColor", glm::vec3(1.0f, 0.75f, 0.7f)); // Slightly warm sunlight color
     
     // Extract camera position from the view matrix
     glm::mat4 invView = glm::inverse(viewMatrix);

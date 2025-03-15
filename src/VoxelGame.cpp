@@ -8,11 +8,12 @@
 #include <ctime>
 #include <iomanip>
 #include <sstream>
+#include <cstdlib> // For rand()
 
 namespace VoxelEngine {
 
 VoxelGame::VoxelGame()
-    : Application("Voxel Game with Greedy Meshing", 1600, 900),
+    : Application("Voxel Game with Greedy Meshing", 3840, 2160),
       m_Camera(45.0f, 16.0f / 9.0f, 0.1f, 1000.0f),
       m_ScreenshotCounter(0),
       m_TakeScreenshotNextFrame(false)
@@ -54,27 +55,49 @@ void VoxelGame::onUpdate(float deltaTime) {
     // Handle camera movement
     // Forward/backward
     if (m_Window->isKeyPressed(GLFW_KEY_W)) {
-        m_Camera.moveForward(10.0f * deltaTime);
+        m_Camera.moveForward(m_MovementSpeed * deltaTime);
     }
     if (m_Window->isKeyPressed(GLFW_KEY_S)) {
-        m_Camera.moveForward(-10.0f * deltaTime);
+        m_Camera.moveForward(-m_MovementSpeed * deltaTime);
     }
     
     // Left/right
     if (m_Window->isKeyPressed(GLFW_KEY_A)) {
-        m_Camera.moveRight(-10.0f * deltaTime);
+        m_Camera.moveRight(-m_MovementSpeed * deltaTime);
     }
     if (m_Window->isKeyPressed(GLFW_KEY_D)) {
-        m_Camera.moveRight(10.0f * deltaTime);
+        m_Camera.moveRight(m_MovementSpeed * deltaTime);
     }
     
     // Up/down
     if (m_Window->isKeyPressed(GLFW_KEY_SPACE)) {
-        m_Camera.moveUp(10.0f * deltaTime);
+        m_Camera.moveUp(m_MovementSpeed * deltaTime);
     }
     if (m_Window->isKeyPressed(GLFW_KEY_LEFT_SHIFT)) {
-        m_Camera.moveUp(-10.0f * deltaTime);
+        m_Camera.moveUp(-m_MovementSpeed * deltaTime);
     }
+    
+    // Adjust movement speed
+    static bool wasPlusPressed = false;
+    static bool wasMinusPressed = false;
+    
+    bool isPlusPressed = m_Window->isKeyPressed(GLFW_KEY_EQUAL); // + key (usually SHIFT+=)
+    bool isMinusPressed = m_Window->isKeyPressed(GLFW_KEY_MINUS);
+    
+    // Increase speed with + key
+    if (isPlusPressed && !wasPlusPressed) {
+        m_MovementSpeed += 10.0f;
+        std::cout << "Movement speed: " << m_MovementSpeed << std::endl;
+    }
+    
+    // Decrease speed with - key (minimum 10.0f)
+    if (isMinusPressed && !wasMinusPressed) {
+        m_MovementSpeed = std::max(10.0f, m_MovementSpeed - 10.0f);
+        std::cout << "Movement speed: " << m_MovementSpeed << std::endl;
+    }
+    
+    wasPlusPressed = isPlusPressed;
+    wasMinusPressed = isMinusPressed;
     
     // Process mouse input for camera look
     double xpos, ypos;
@@ -201,39 +224,8 @@ void VoxelGame::generateTestWorld() {
                     float worldZ = cz * Chunk::CHUNK_SIZE_Z + z;
                     
                     // Base terrain height
-                    int baseHeight = 4;
-                    
-                    // Apply height variation based on biome and noise
-                    float terrainHeight = simpleNoise(worldX, worldZ);
-                    
-                    // Adjust height based on biome
-                    switch (biome) {
-                        case BiomeType::Mountains:
-                            terrainHeight *= 2.5f;
-                            baseHeight = 8;
-                            break;
-                        case BiomeType::Hills:
-                            terrainHeight *= 1.5f;
-                            baseHeight = 6;
-                            break;
-                        case BiomeType::Plains:
-                            terrainHeight *= 0.5f;
-                            baseHeight = 4;
-                            break;
-                        case BiomeType::Forest:
-                            terrainHeight *= 0.8f;
-                            baseHeight = 5;
-                            break;
-                        case BiomeType::Desert:
-                            terrainHeight *= 0.3f;
-                            terrainHeight = abs(terrainHeight); // Create dunes
-                            baseHeight = 3;
-                            break;
-                    }
-                    
-                    // Calculate final height (clamped between 1 and 40)
-                    int height = std::max(1, std::min(40, static_cast<int>(baseHeight + terrainHeight)));
-                    
+                    int height = 4;
+                 
                     // Bedrock layer
                     chunk->setVoxel(x, 0, z, VoxelType::Stone);
                     
@@ -242,82 +234,19 @@ void VoxelGame::generateTestWorld() {
                         chunk->setVoxel(x, y, z, VoxelType::Stone);
                     }
                     
-                    // Add different top layers based on biome
-                    switch (biome) {
-                        case BiomeType::Desert:
-                            // Desert has sand on top
-                            chunk->setVoxel(x, height - 2, z, VoxelType::Sand);
-                            chunk->setVoxel(x, height - 1, z, VoxelType::Sand);
-                            break;
-                        
-                        case BiomeType::Mountains:
-                            // Mountains have stone on top if high enough
-                            if (height > 15) {
-                                chunk->setVoxel(x, height - 2, z, VoxelType::Stone);
-                                chunk->setVoxel(x, height - 1, z, VoxelType::Stone);
-                            } else {
-                                chunk->setVoxel(x, height - 2, z, VoxelType::Dirt);
-                                chunk->setVoxel(x, height - 1, z, VoxelType::Grass);
-                            }
-                            break;
-                        
-                        default:
-                            // Most biomes have dirt with grass on top
-                            chunk->setVoxel(x, height - 2, z, VoxelType::Dirt);
-                            chunk->setVoxel(x, height - 1, z, VoxelType::Grass);
-                            break;
+                    // Most biomes have dirt with grass on top
+                    if(x == 0 || x == Chunk::CHUNK_SIZE_X - 1 || z == 0 || z == Chunk::CHUNK_SIZE_Z - 1){   
+                        chunk->setVoxel(x, height - 1, z, VoxelType::Stone);
                     }
-                    
-                    // Add water at a fixed level
-                    const int waterLevel = 5;
-                    if (height < waterLevel) {
-                        for (int y = height; y < waterLevel; y++) {
-                            chunk->setVoxel(x, y, z, VoxelType::Water);
-                        }
-                        // Convert dirt/grass under water to sand
-                        if (height >= 2) {
-                            chunk->setVoxel(x, height - 1, z, VoxelType::Sand);
-                        }
+                    else{
+                        chunk->setVoxel(x, height - 2, z, VoxelType::Dirt);
+                        chunk->setVoxel(x, height - 1, z, VoxelType::Grass);
                     }
                 }
             }
             
-            // Add structures based on biome type
-            switch (biome) {
-                case BiomeType::Forest:
-                    // Add many trees
-                    addTrees(chunk, 15, 4, 7);
-                    break;
-                
-                case BiomeType::Plains:
-                    // Add few scattered trees
-                    addTrees(chunk, 5, 3, 5);
-                    break;
-                
-                case BiomeType::Hills:
-                    // Add some trees and maybe a small structure
-                    addTrees(chunk, 8, 4, 6);
-                    
-                    // Maybe add a small house on a hill
-                    if ((cx + cz) % 3 == 0) {
-                        addHouse(chunk);
-                    }
-                    break;
-                
-                case BiomeType::Mountains:
-                    // Add a mountain tower
-                    if ((cx + cz) % 4 == 0) {
-                        addTower(chunk, true);
-                    }
-                    break;
-                
-                case BiomeType::Desert:
-                    // Add a desert temple
-                    if ((cx + cz) % 5 == 0) {
-                        addTemple(chunk);
-                    }
-                    break;
-            }
+            // add skyscraper
+            addSkyscraper(chunk);
             
             // Build the chunk mesh
             chunk->buildMesh();
@@ -414,6 +343,83 @@ void VoxelGame::addTrees(Chunk* chunk, int count, int minHeight, int maxHeight) 
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+void VoxelGame::addSkyscraper(Chunk* chunk) {
+    // Find a suitable location for the skyscraper (center of the chunk)
+    int centerX = Chunk::CHUNK_SIZE_X / 2;
+    int centerZ = Chunk::CHUNK_SIZE_Z / 2;
+
+    // Find the surface height at this position
+    int baseY = 0;
+    for (int y = Chunk::CHUNK_SIZE_Y - 1; y >= 0; y--) {
+        VoxelType voxel = chunk->getVoxel(centerX, y, centerZ);
+        if (voxel != VoxelType::Air && voxel != VoxelType::Water) {
+            baseY = y + 1;
+            break;
+        }
+    }
+
+    // Skip if underwater
+    if (chunk->getVoxel(centerX, baseY, centerZ) == VoxelType::Water) {
+        return;
+    }
+
+    // Skyscraper base dimensions (randomized)
+    int baseWidth = 6 + (rand() % 5); // Width between 6 and 10
+    int baseDepth = 6 + (rand() % 5); // Depth between 6 and 10
+    int totalHeight = 20 + (rand() % 21); // Height between 20 and 40
+    int sectionHeight = 5 + (rand() % 3); // Each section is 5-7 voxels tall
+
+    int currentY = baseY;
+
+    // Build the skyscraper in sections
+    int currentWidth = baseWidth;
+    int currentDepth = baseDepth;
+    while (currentY < baseY + totalHeight && currentY < Chunk::CHUNK_SIZE_Y) {
+        // Build one section
+        for (int y = currentY; y < currentY + sectionHeight && y < baseY + totalHeight; y++) {
+            for (int x = centerX - currentWidth / 2; x <= centerX + currentWidth / 2; x++) {
+                for (int z = centerZ - currentDepth / 2; z <= centerZ + currentDepth / 2; z++) {
+                    // Skip if out of bounds
+                    if (x < 0 || x >= Chunk::CHUNK_SIZE_X || 
+                        y >= Chunk::CHUNK_SIZE_Y || 
+                        z < 0 || z >= Chunk::CHUNK_SIZE_Z) {
+                        continue;
+                    }
+
+                    // Build only the walls (hollow inside)
+                    if (x == centerX - currentWidth / 2 || x == centerX + currentWidth / 2 ||
+                        z == centerZ - currentDepth / 2 || z == centerZ + currentDepth / 2) {
+                        chunk->setVoxel(x, y, z, VoxelType::Water); // Use Wood or another type
+                    }
+                }
+            }
+        }
+
+        // Move up to the next section
+        currentY += sectionHeight;
+
+        // Reduce width and depth for the next section (setback effect), but not below 4
+        currentWidth = std::max(4, currentWidth - (rand() % 3)); // Shrink by 0-2
+        currentDepth = std::max(4, currentDepth - (rand() % 3));
+    }
+
+    //currentY -= sectionHeight;
+
+    // Add a simple flat roof or spire
+    if (currentY < Chunk::CHUNK_SIZE_Y) {
+        for (int x = centerX - currentWidth / 2; x <= centerX + currentWidth / 2; x++) {
+            for (int z = centerZ - currentDepth / 2; z <= centerZ + currentDepth / 2; z++) {
+                if (x < 0 || x >= Chunk::CHUNK_SIZE_X || 
+                    currentY >= Chunk::CHUNK_SIZE_Y || 
+                    z < 0 || z >= Chunk::CHUNK_SIZE_Z) {
+                    continue;
+                }
+                chunk->setVoxel(x, baseY + totalHeight, z, VoxelType::Wood); // Flat roof
             }
         }
     }

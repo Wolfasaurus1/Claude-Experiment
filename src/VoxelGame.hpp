@@ -40,6 +40,7 @@ private:
     void generateTestWorld();
     
     // Helper methods for terrain generation
+    void addSkyscraper(Chunk* chunk);
     void addTrees(Chunk* chunk, int count, int minHeight, int maxHeight);
     void addHouse(Chunk* chunk);
     void addTower(Chunk* chunk, bool isMountain);
@@ -90,6 +91,9 @@ private:
     float m_LastMouseY;
     
     bool m_WireframeMode;
+    
+    // Player movement speed (units per second)
+    float m_MovementSpeed = 30.0f;
 };
 
 } // namespace VoxelEngine 

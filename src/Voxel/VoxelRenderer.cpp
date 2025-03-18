@@ -13,7 +13,10 @@ VoxelRenderer::~VoxelRenderer() {
 }
 
 void VoxelRenderer::init() {
-    // Initialize shader
+    // Initialize shadow map with higher resolution
+    m_ShadowMap = std::make_unique<ShadowMap>(4096, 4096);
+    
+    // Initialize shader with shadow mapping support
     const std::string vertexShaderSource = R"(
         #version 330 core
         layout (location = 0) in vec3 aPos;
@@ -25,16 +28,21 @@ void VoxelRenderer::init() {
         out vec3 Normal;
         out vec2 TexCoords;
         out vec4 Color;
+        out vec4 FragPosLightSpace;
 
         uniform mat4 model;
         uniform mat4 view;
         uniform mat4 projection;
+        uniform mat4 lightSpaceMatrix;
 
         void main() {
             FragPos = vec3(model * vec4(aPos, 1.0));
             Normal = mat3(transpose(inverse(model))) * aNormal;
             TexCoords = aTexCoords;
             Color = aColor;
+            
+            // Calculate position in light space for shadow mapping
+            FragPosLightSpace = lightSpaceMatrix * vec4(FragPos, 1.0);
             
             gl_Position = projection * view * model * vec4(aPos, 1.0);
         }
@@ -46,12 +54,62 @@ void VoxelRenderer::init() {
         in vec3 Normal;
         in vec2 TexCoords;
         in vec4 Color;
+        in vec4 FragPosLightSpace;
 
         out vec4 FragColor;
 
         uniform vec3 lightDir;
         uniform vec3 lightColor;
         uniform vec3 viewPos;
+        uniform sampler2D shadowMap;
+        uniform bool shadowsEnabled;
+
+        // Calculate shadow factor
+        float calculateShadow(vec4 fragPosLightSpace) {
+            // Perform perspective divide
+            vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
+            
+            // Transform to [0,1] range
+            projCoords = projCoords * 0.5 + 0.5;
+            
+            // Check if position is outside the far plane or out of shadow map bounds
+            if(projCoords.z > 1.0 || projCoords.x < 0.0 || projCoords.x > 1.0 || projCoords.y < 0.0 || projCoords.y > 1.0) {
+                return 0.0;
+            }
+            
+            // Get closest depth value from light's perspective
+            float closestDepth = texture(shadowMap, projCoords.xy).r; 
+            
+            // Get current depth value
+            float currentDepth = projCoords.z;
+            
+            // Calculate bias based on depth map resolution and slope
+            vec3 normal = normalize(Normal);
+            vec3 lightDirection = normalize(lightDir);
+            float cosTheta = max(dot(normal, lightDirection), 0.0);
+            float bias = max(0.0003 * (1.0 - cosTheta), 0.00005);
+            
+            // For very steep angles (sun near horizon), increase bias slightly
+            if (cosTheta < 0.1) {
+                bias *= 3.0;
+            }
+            
+            // Check whether current fragment is in shadow
+            float shadow = 0.0;
+            
+            // PCF (Percentage-Closer Filtering)
+            float shadowValue = 0.0;
+            vec2 texelSize = 1.0 / textureSize(shadowMap, 0);
+            for(int x = -2; x <= 2; ++x) {
+                for(int y = -2; y <= 2; ++y) {
+                    float pcfDepth = texture(shadowMap, projCoords.xy + vec2(x, y) * texelSize).r; 
+                    shadowValue += currentDepth - bias > pcfDepth ? 1.0 : 0.0;        
+                }    
+            }
+            shadow = shadowValue / 25.0; // Using a 5x5 PCF kernel
+            
+            return shadow;
+        }
 
         void main() {
             // Ambient: Lower intensity for a softer base lighting.
@@ -71,8 +129,17 @@ void VoxelRenderer::init() {
             float spec = pow(max(dot(viewDir, reflectDir), 0.0), 10);
             vec3 specular = specularStrength * spec * lightColor;
             
-            // Combine lighting with vertex color.
-            vec3 result = (ambient + diffuse + specular) * Color.rgb;
+            // Calculate shadow
+            float shadow = shadowsEnabled ? calculateShadow(FragPosLightSpace) : 0.0;
+            
+            // Make shadows more pronounced
+            shadow = min(shadow * 2.0, 0.85); // Increase shadow intensity and cap at 85% darkness
+            
+            // Apply a slight ambient occlusion effect in shadowed areas
+            float ambientOcclusion = 1.0 - shadow * 0.3;
+            
+            // Combine lighting with vertex color and shadow
+            vec3 result = (ambient * ambientOcclusion + (1.0 - shadow) * (diffuse + specular)) * Color.rgb;
             
             // Apply gamma correction for a more natural appearance.
             float gamma = 2.2;
@@ -328,6 +395,27 @@ void VoxelRenderer::buildGreedyMesh(int chunkSizeX, int chunkSizeY, int chunkSiz
               << "% reduction)" << std::endl;
 }
 
+void VoxelRenderer::renderMeshOnly(Shader* shader) {
+    if (!m_Mesh || !shader) {
+        return;
+    }
+    
+    // Enable depth testing
+    glEnable(GL_DEPTH_TEST);
+    
+    // Bind shader
+    shader->bind();
+    
+    // Set model matrix to identity (handled by the caller if needed)
+    shader->setMat4("model", glm::mat4(1.0f));
+    
+    // Render mesh geometry
+    m_Mesh->render();
+    
+    // Unbind shader
+    shader->unbind();
+}
+
 void VoxelRenderer::render(const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix) {
     if (!m_Mesh || !m_Shader) {
         return;
@@ -352,13 +440,20 @@ void VoxelRenderer::render(const glm::mat4& viewMatrix, const glm::mat4& project
     m_Shader->setMat4("projection", projectionMatrix);
     
     // Set lighting uniforms
-    m_Shader->setVec3("lightDir", glm::normalize(glm::vec3(1.0f, 2.0f, 3.0f)));
-    m_Shader->setVec3("lightColor", glm::vec3(1.0f, 0.75f, 0.7f)); // Slightly warm sunlight color
+    m_Shader->setVec3("lightDir", m_LightDir);
+    m_Shader->setVec3("lightColor", m_LightColor);
     
     // Extract camera position from the view matrix
     glm::mat4 invView = glm::inverse(viewMatrix);
     glm::vec3 viewPos = glm::vec3(invView[3]);
     m_Shader->setVec3("viewPos", viewPos);
+    
+    // Set shadow mapping uniforms
+    m_Shader->setInt("shadowMap", 0);
+    m_Shader->setBool("shadowsEnabled", m_ShadowsEnabled);
+    
+    // Set light space matrix - use the matrix that was set by the game
+    m_Shader->setMat4("lightSpaceMatrix", m_LightSpaceMatrix);
     
     // Render mesh
     m_Mesh->render();
@@ -368,6 +463,32 @@ void VoxelRenderer::render(const glm::mat4& viewMatrix, const glm::mat4& project
     
     // Unbind shader
     m_Shader->unbind();
+}
+
+void VoxelRenderer::renderShadowPass() {
+    if (!m_Mesh || !m_ShadowMap) {
+        return;
+    }
+    
+    // Begin shadow pass
+    m_ShadowMap->begin();
+    
+    // Use shadow shader and set model matrix
+    m_ShadowMap->getShadowShader()->setMat4("model", glm::mat4(1.0f));
+    
+    // Render mesh
+    m_Mesh->render();
+    
+    // End shadow pass
+    m_ShadowMap->end();
+}
+
+void VoxelRenderer::updateLight(const glm::vec3& lightDir, const glm::vec3& center, float radius) {
+    m_LightDir = glm::normalize(lightDir);
+    
+    if (m_ShadowMap) {
+        m_ShadowMap->updateLightSpaceMatrix(m_LightDir, center, radius);
+    }
 }
 
 glm::vec4 VoxelRenderer::getVoxelColor(VoxelType type) const {

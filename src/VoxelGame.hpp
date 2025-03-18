@@ -3,6 +3,7 @@
 #include "Core/Application.hpp"
 #include "Voxel/Chunk.hpp"
 #include "Renderer/Camera.hpp"
+#include "Renderer/ShadowMap.hpp"
 #include <memory>
 #include <vector>
 #include <string>
@@ -36,6 +37,13 @@ private:
     void render();
     void handleInput();
     void takeScreenshot();
+    void updateLightDirection(float deltaTime);
+    
+    // Shadow mapping methods
+    void renderShadowPass();
+    void renderSceneWithShadows();
+    void updateLightSpaceMatrix();
+    void calculateSceneBounds();
     
     void generateTestWorld();
     
@@ -78,19 +86,31 @@ private:
 
     std::unordered_map<uint64_t, Chunk*> m_Chunks;
     Camera m_Camera;
-    bool m_Running;
+    bool m_Running = true;
     
-    int m_WindowWidth;
-    int m_WindowHeight;
+    int m_WindowWidth = 0;
+    int m_WindowHeight = 0;
     
-    float m_LastFrameTime;
-    float m_DeltaTime;
+    float m_LastFrameTime = 0.0f;
+    float m_DeltaTime = 0.0f;
     
-    bool m_FirstMouse;
-    float m_LastMouseX;
-    float m_LastMouseY;
+    bool m_FirstMouse = true;
+    float m_LastMouseX = 0.0f;
+    float m_LastMouseY = 0.0f;
     
-    bool m_WireframeMode;
+    bool m_WireframeMode = false;
+    
+    // Light properties for shadow mapping
+    glm::vec3 m_LightDir = glm::normalize(glm::vec3(0.2f, -0.9f, 0.3f));
+    float m_DayNightCycle = 0.0f; // 0.0 to 1.0, representing time of day
+    float m_DayNightSpeed = 0.05f; // Speed of day/night cycle
+    bool m_DayNightEnabled = true; // Enable or disable day/night cycle
+    
+    // Shadow mapping
+    std::unique_ptr<ShadowMap> m_ShadowMap;
+    bool m_ShadowsEnabled = true;
+    glm::vec3 m_SceneCenter = glm::vec3(0.0f);
+    float m_SceneRadius = 500.0f;
     
     // Player movement speed (units per second)
     float m_MovementSpeed = 30.0f;

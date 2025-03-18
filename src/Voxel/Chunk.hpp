@@ -38,6 +38,12 @@ public:
     // Get the chunk position
     const glm::ivec3& getPosition() const { return m_Position; }
     
+    // Get the chunk renderer
+    VoxelRenderer* getRenderer() const { return m_Renderer.get(); }
+    
+    // Check if the chunk is empty (contains only air voxels)
+    bool isEmpty() const;
+    
     // Set neighboring chunks
     void setNeighbor(const glm::ivec3& direction, Chunk* chunk);
     
@@ -60,6 +66,9 @@ private:
     
     // Neighboring chunks (for mesh generation)
     std::unordered_map<int, Chunk*> m_Neighbors; // Direction index -> Chunk
+    
+    // Flag for empty chunks
+    bool m_Empty = true;
 };
 
 } // namespace VoxelEngine 

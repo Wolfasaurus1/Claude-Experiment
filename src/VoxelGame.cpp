@@ -9,6 +9,7 @@
 #include <iomanip>
 #include <sstream>
 #include <cstdlib> // For rand()
+#include <limits> // For FLT_MAX
 
 namespace VoxelEngine {
 
@@ -16,7 +17,8 @@ VoxelGame::VoxelGame()
     : Application("Voxel Game with Greedy Meshing", 3840, 2160),
       m_Camera(45.0f, 16.0f / 9.0f, 0.1f, 1000.0f),
       m_ScreenshotCounter(0),
-      m_TakeScreenshotNextFrame(false)
+      m_TakeScreenshotNextFrame(false),
+      m_FirstMouse(true)
 {
     // Create screenshots directory if it doesn't exist
     m_ScreenshotPath = "screenshots/";
@@ -32,23 +34,33 @@ VoxelGame::~VoxelGame() {
 }
 
 void VoxelGame::onInit() {
+    // Set the background color to sky blue
+    glClearColor(0.67f, 0.85f, 0.9f, 1.0f);
+    
     // Enable depth testing
     glEnable(GL_DEPTH_TEST);
     
-    // Set clear color to sky blue
-    glClearColor(0.741,0.847,1, 1.0f);
+    // Initialize camera with the aspect ratio of the window
+    float aspectRatio = static_cast<float>(m_Window->getWidth()) / static_cast<float>(m_Window->getHeight());
+    m_Camera = Camera(45.0f, aspectRatio, 0.1f, 1000.0f);
     
-    // Set initial camera position and rotation
-    m_Camera.setPosition(glm::vec3(32.0f, 32.0f, 32.0f));
-    m_Camera.setRotation(-45.0f, -30.0f);
+    // Set the camera to a better starting position
+    m_Camera.setPosition(glm::vec3(48.0f, 96.0f, 48.0f));
     
-    // Hide cursor for better first-person navigation
-    m_Window->disableCursor();
+    // Capture the cursor for camera movement
+    glfwSetInputMode(m_Window->getGLFWWindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     
-    // Generate test world
+    // Initialize the shadow map with high resolution
+    m_ShadowMap = std::make_unique<ShadowMap>(4096, 4096);
+    
+    // Generate the test world
     generateTestWorld();
-
-    m_FirstMouse = true;
+    
+    // Initialize scene center and radius
+    calculateSceneBounds();
+    
+    // Initialize light space matrix
+    updateLightSpaceMatrix();
 }
 
 void VoxelGame::onUpdate(float deltaTime) {
@@ -104,22 +116,25 @@ void VoxelGame::onUpdate(float deltaTime) {
     m_Window->getCursorPosition(xpos, ypos);
     
     if (m_FirstMouse) {
-        m_LastMouseX = xpos;
-        m_LastMouseY = ypos;
+        m_LastMouseX = static_cast<float>(xpos);
+        m_LastMouseY = static_cast<float>(ypos);
         m_FirstMouse = false;
     }
     
     double xoffset = xpos - m_LastMouseX;
     double yoffset = m_LastMouseY - ypos; // Reversed since y-coordinates go from bottom to top
     
-    m_LastMouseX = xpos;
-    m_LastMouseY = ypos;
+    m_LastMouseX = static_cast<float>(xpos);
+    m_LastMouseY = static_cast<float>(ypos);
     
     // Rotate camera based on mouse movement
     m_Camera.processMouseMovement(static_cast<float>(xoffset), static_cast<float>(yoffset));
 
     // Update camera
     m_Camera.update(deltaTime);
+    
+    // Update light direction for day/night cycle
+    updateLightDirection(deltaTime);
     
     // Take screenshot if requested
     if (m_TakeScreenshotNextFrame) {
@@ -140,10 +155,114 @@ void VoxelGame::onRender() {
     // Clear the screen
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     
-    // Render all chunks
-    for (const auto& pair : m_Chunks) {
-        pair.second->render(m_Camera.getViewMatrix(), m_Camera.getProjectionMatrix());
+    // If shadows are enabled, do the shadow pass first
+    if (m_ShadowsEnabled) {
+        renderShadowPass();
     }
+    
+    // Then render the scene with shadows
+    renderSceneWithShadows();
+}
+
+void VoxelGame::renderShadowPass() {
+    // Begin shadow rendering pass
+    m_ShadowMap->begin();
+    
+    // For each chunk, render to shadow map
+    for (const auto& pair : m_Chunks) {
+        Chunk* chunk = pair.second;
+        
+        // Skip empty chunks
+        if (!chunk->isEmpty()) {
+            // Get the chunk renderer and render the mesh (shadow pass only)
+            VoxelRenderer* renderer = chunk->getRenderer();
+            if (renderer) {
+                // Use the shadow shader to render just the mesh
+                renderer->renderMeshOnly(m_ShadowMap->getShadowShader());
+            }
+        }
+    }
+    
+    // End shadow rendering pass
+    m_ShadowMap->end();
+}
+
+void VoxelGame::renderSceneWithShadows() {
+    // If shadows are enabled, bind the shadow map texture
+    if (m_ShadowsEnabled && m_ShadowMap) {
+        m_ShadowMap->bindTexture(0);
+    }
+    
+    // For each chunk, render with shadow mapping
+    for (const auto& pair : m_Chunks) {
+        Chunk* chunk = pair.second;
+        
+        // Set the light space matrix and shadows enabled in the chunk renderer
+        VoxelRenderer* renderer = chunk->getRenderer();
+        if (renderer) {
+            // Enable shadows based on global setting
+            renderer->enableShadows(m_ShadowsEnabled);
+            
+            // If shadows are enabled, provide the light space matrix
+            if (m_ShadowsEnabled && m_ShadowMap) {
+                // Set the light space matrix for shadow mapping
+                renderer->setLightSpaceMatrix(m_ShadowMap->getLightSpaceMatrix());
+                
+                // Set the light direction
+                renderer->setLightDirection(m_LightDir);
+            }
+            
+            // Render the chunk with shadow mapping
+            chunk->render(m_Camera.getViewMatrix(), m_Camera.getProjectionMatrix());
+        }
+    }
+}
+
+void VoxelGame::updateLightSpaceMatrix() {
+    if (m_ShadowMap) {
+        m_ShadowMap->updateLightSpaceMatrix(m_LightDir, m_SceneCenter, m_SceneRadius);
+    }
+}
+
+void VoxelGame::calculateSceneBounds() {
+    if (m_Chunks.empty()) {
+        m_SceneCenter = glm::vec3(0.0f);
+        m_SceneRadius = 100.0f;
+        return;
+    }
+    
+    // Calculate the bounding box of all chunks
+    glm::vec3 minPos(std::numeric_limits<float>::max());
+    glm::vec3 maxPos(-std::numeric_limits<float>::max());
+    
+    for (const auto& pair : m_Chunks) {
+        Chunk* chunk = pair.second;
+        glm::ivec3 chunkPos = chunk->getPosition();
+        
+        // Convert chunk position to world coordinates
+        glm::vec3 worldMinPos = glm::vec3(
+            chunkPos.x * Chunk::CHUNK_SIZE_X,
+            chunkPos.y * Chunk::CHUNK_SIZE_Y,
+            chunkPos.z * Chunk::CHUNK_SIZE_Z
+        );
+        
+        glm::vec3 worldMaxPos = worldMinPos + glm::vec3(
+            Chunk::CHUNK_SIZE_X,
+            Chunk::CHUNK_SIZE_Y,
+            Chunk::CHUNK_SIZE_Z
+        );
+        
+        // Update min/max positions
+        minPos = glm::min(minPos, worldMinPos);
+        maxPos = glm::max(maxPos, worldMaxPos);
+    }
+    
+    // Calculate center and radius
+    m_SceneCenter = (minPos + maxPos) * 0.5f;
+    m_SceneRadius = glm::length(maxPos - minPos) * 0.5f;
+    
+    // Ensure a minimum radius
+    m_SceneRadius = std::max(m_SceneRadius, 100.0f);
 }
 
 void VoxelGame::onImGuiRender() {
@@ -537,7 +656,6 @@ void VoxelGame::init(int windowWidth, int windowHeight, const std::string& title
     m_Running = true;
     m_LastFrameTime = 0.0f;
     m_DeltaTime = 0.0f;
-    m_FirstMouse = true;
     m_LastMouseX = windowWidth / 2.0f;
     m_LastMouseY = windowHeight / 2.0f;
     m_WireframeMode = false;
@@ -552,6 +670,65 @@ void VoxelGame::run() {
     
     // Run the application
     Application::run();
+}
+
+void VoxelGame::updateLightDirection(float deltaTime) {
+    if (m_DayNightEnabled) {
+        // Update day/night cycle
+        m_DayNightCycle += deltaTime * m_DayNightSpeed;
+        if (m_DayNightCycle > 1.0f) {
+            m_DayNightCycle -= 1.0f;
+        }
+        
+        // Calculate light direction based on time of day
+        // Morning: Light from east (-x, +y, 0)
+        // Noon: Light from above (0, +y, 0)
+        // Evening: Light from west (+x, +y, 0)
+        // Night: Light from moon (0, -y, 0)
+        
+        float angle = m_DayNightCycle * 2.0f * glm::pi<float>();
+        
+        // X component varies from -1 to 1 throughout the day
+        float x = -cosf(angle);
+        
+        // Y component is highest at noon, lowest at midnight
+        float y = sinf(angle);
+        
+        // Z component adds some variation
+        float z = sinf(angle * 0.5f) * 0.5f;
+        
+        // During night, reduce light intensity
+        if (y < 0) {
+            y *= 0.3f; // Moonlight is less bright
+        } else {
+            y = std::max(0.3f, y); // Ensure minimum light during day
+        }
+        
+        m_LightDir = glm::normalize(glm::vec3(x, std::max(0.1f, y), z));
+        
+        // Toggle shadows with L key
+        static bool wasLPressed = false;
+        bool isLPressed = m_Window->isKeyPressed(GLFW_KEY_L);
+        if (isLPressed && !wasLPressed) {
+            for (auto& pair : m_Chunks) {
+                auto renderer = pair.second->getRenderer();
+                if (renderer) {
+                    renderer->enableShadows(!renderer->areShadowsEnabled());
+                }
+            }
+            std::cout << "Shadows toggled" << std::endl;
+        }
+        wasLPressed = isLPressed;
+        
+        // Toggle day/night cycle with K key
+        static bool wasKPressed = false;
+        bool isKPressed = m_Window->isKeyPressed(GLFW_KEY_K);
+        if (isKPressed && !wasKPressed) {
+            m_DayNightEnabled = !m_DayNightEnabled;
+            std::cout << "Day/night cycle " << (m_DayNightEnabled ? "enabled" : "disabled") << std::endl;
+        }
+        wasKPressed = isKPressed;
+    }
 }
 
 } // namespace VoxelEngine 

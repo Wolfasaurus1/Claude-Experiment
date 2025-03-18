@@ -24,6 +24,13 @@ void Chunk::setVoxel(int x, int y, int z, VoxelType type) {
     
     int index = (y * CHUNK_SIZE_Z + z) * CHUNK_SIZE_X + x;
     m_Voxels[index] = type;
+    
+    // If any non-air voxel is added, the chunk is not empty
+    if (type != VoxelType::Air) {
+        m_Empty = false;
+    }
+    // Note: We don't set m_Empty to true if we set a voxel to air,
+    // as we'd need to check all voxels to confirm the chunk is empty
 }
 
 VoxelType Chunk::getVoxel(int x, int y, int z) const {
@@ -60,6 +67,12 @@ void Chunk::buildMesh() {
 }
 
 void Chunk::render(const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix) {
+    // Skip rendering if empty or no renderer
+    if (m_Empty || !m_Renderer) {
+        return;
+    }
+    
+    // Render the chunk with the current view/projection matrices
     m_Renderer->render(viewMatrix, projectionMatrix);
 }
 
@@ -169,6 +182,10 @@ VoxelType Chunk::getVoxelWorldSpace(int x, int y, int z) const {
     
     // No neighbor or invalid position, return air
     return VoxelType::Air;
+}
+
+bool Chunk::isEmpty() const {
+    return m_Empty;
 }
 
 } // namespace VoxelEngine 

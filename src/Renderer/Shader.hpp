@@ -20,6 +20,7 @@ public:
     void unbind() const;
 
     // Set uniforms
+    void setBool(const std::string& name, bool value);
     void setInt(const std::string& name, int value);
     void setFloat(const std::string& name, float value);
     void setVec2(const std::string& name, const glm::vec2& value);

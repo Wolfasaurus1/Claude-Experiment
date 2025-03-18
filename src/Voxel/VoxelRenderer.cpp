@@ -112,28 +112,36 @@ void VoxelRenderer::init() {
         }
 
         void main() {
-            // Ambient: Lower intensity for a softer base lighting.
-            float ambientStrength = 0.3;
-            vec3 ambient = ambientStrength * lightColor;
+            // Calculate light intensity based on direction (day/night cycle)
+            // Light pointing straight down (noon) will be brightest
+            float lightIntensityFactor = max(0.2, -lightDir.y);
+            vec3 adjustedLightColor = lightColor * lightIntensityFactor;
+            
+            // Ambient: Adjust based on time of day
+            // Higher ambient at noon, lower at night
+            float timeOfDay = max(0.2, -lightDir.y); // 0.0 = night, 1.0 = noon
+            float ambientStrength = mix(0.15, 0.4, timeOfDay);
+            vec3 ambient = ambientStrength * adjustedLightColor;
             
             // Diffuse: Calculate using a normalized normal and light direction.
             vec3 norm = normalize(Normal);
             vec3 lightDirection = normalize(lightDir);
             float diff = max(dot(norm, lightDirection), 0.0);
-            vec3 diffuse = diff * lightColor;
+            vec3 diffuse = diff * adjustedLightColor;
             
             // Specular: Use a lower exponent and reduced intensity for softer highlights.
-            float specularStrength = 0.05;
+            float specularStrength = 0.05 * lightIntensityFactor;
             vec3 viewDir = normalize(viewPos - FragPos);
             vec3 reflectDir = reflect(-lightDirection, norm);
             float spec = pow(max(dot(viewDir, reflectDir), 0.0), 10);
-            vec3 specular = specularStrength * spec * lightColor;
+            vec3 specular = specularStrength * spec * adjustedLightColor;
             
             // Calculate shadow
             float shadow = shadowsEnabled ? calculateShadow(FragPosLightSpace) : 0.0;
             
-            // Make shadows more pronounced
-            shadow = min(shadow * 2.0, 0.85); // Increase shadow intensity and cap at 85% darkness
+            // Make shadows more pronounced during daytime and lighter during night
+            float shadowIntensity = mix(0.5, 2.0, timeOfDay);
+            shadow = min(shadow * shadowIntensity, 0.85);
             
             // Apply a slight ambient occlusion effect in shadowed areas
             float ambientOcclusion = 1.0 - shadow * 0.3;

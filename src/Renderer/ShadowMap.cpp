@@ -132,25 +132,51 @@ void ShadowMap::updateLightSpaceMatrix(const glm::vec3& lightDir,
     // Direction should be normalized
     glm::vec3 lightDirection = glm::normalize(lightDir);
     
-    // For sun-like lighting, position the light source 
-    // by moving OPPOSITE to the light direction
+    // For sun-like lighting, position the light source
+    // by moving in the OPPOSITE direction of the light direction vector
     // (since lightDir points FROM light TO scene)
-    glm::vec3 lightPosition = center + lightDirection * (radius * 3.0f);
+    glm::vec3 lightPosition = center - lightDirection * (radius * 3.0f);
+    
+    // The "up" vector for the light's view matrix
+    // For a light coming from above, we use the world up vector (0,1,0)
+    // For lights coming from other angles, we need to ensure the up vector
+    // isn't parallel to the light direction
+    glm::vec3 upVector;
+    
+    // If light is nearly vertical (coming straight down or up)
+    if (std::abs(lightDirection.y) > 0.95f) {
+        // Use world Z axis as up vector
+        upVector = glm::vec3(0.0f, 0.0f, 1.0f);
+    } else {
+        // Otherwise use world up vector
+        upVector = glm::vec3(0.0f, 1.0f, 0.0f);
+    }
     
     // Create light view matrix (looking from light's perspective toward center)
     glm::mat4 lightView = glm::lookAt(
         lightPosition,
         center,
-        glm::vec3(0.0f, 1.0f, 0.0f)
+        upVector
     );
     
     // Create orthographic projection for directional light
     // For sun-like lighting, we need a wider frustum to capture longer shadows
     float orthoSize = radius * 2.2f;
+    
+    // For lights coming in at a steep angle, we might need a deeper frustum
+    float near = 0.1f;
+    float far = radius * 8.0f;
+    
+    // Adjust based on light angle
+    if (lightDirection.y < -0.8f) {
+        // For light coming from directly above, increase near plane
+        near = radius * 0.1f;
+    }
+    
     glm::mat4 lightProjection = glm::ortho(
         -orthoSize, orthoSize,
         -orthoSize, orthoSize,
-        0.1f, radius * 8.0f
+        near, far
     );
     
     // Combine to create the light space matrix

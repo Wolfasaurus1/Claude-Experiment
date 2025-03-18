@@ -699,24 +699,33 @@ void VoxelGame::updateLightDirection(float deltaTime) {
         
         // During night, reduce light intensity
         if (y < 0) {
-            y *= 0.3f; // Moonlight is less bright
+            // Moonlight is less bright
+            y *= 0.3f; 
+            
+            // For night, make the light direction more vertical (as if from moon)
+            x *= 0.5f;
+            z *= 0.5f;
         } else {
-            y = std::max(0.3f, y); // Ensure minimum light during day
+            // Ensure minimum height during day for better shadow casting
+            y = std::max(0.4f, y); 
         }
         
-        m_LightDir = glm::normalize(glm::vec3(x, std::max(0.1f, y), z));
+        // Update the light direction
+        glm::vec3 newLightDir = glm::normalize(glm::vec3(x, -std::abs(y), z));
+        
+        // Smoothly interpolate light direction
+        float transitionSpeed = 1.0f; // Adjust for smoother transitions
+        m_LightDir = glm::normalize(glm::mix(m_LightDir, newLightDir, deltaTime * transitionSpeed));
+        
+        // Update the light space matrix to match the new light direction
+        updateLightSpaceMatrix();
         
         // Toggle shadows with L key
         static bool wasLPressed = false;
         bool isLPressed = m_Window->isKeyPressed(GLFW_KEY_L);
         if (isLPressed && !wasLPressed) {
-            for (auto& pair : m_Chunks) {
-                auto renderer = pair.second->getRenderer();
-                if (renderer) {
-                    renderer->enableShadows(!renderer->areShadowsEnabled());
-                }
-            }
-            std::cout << "Shadows toggled" << std::endl;
+            m_ShadowsEnabled = !m_ShadowsEnabled;
+            std::cout << "Shadows " << (m_ShadowsEnabled ? "enabled" : "disabled") << std::endl;
         }
         wasLPressed = isLPressed;
         
@@ -728,6 +737,25 @@ void VoxelGame::updateLightDirection(float deltaTime) {
             std::cout << "Day/night cycle " << (m_DayNightEnabled ? "enabled" : "disabled") << std::endl;
         }
         wasKPressed = isKPressed;
+        
+        // Adjust day/night cycle speed with [ and ] keys
+        static bool wasLeftBracketPressed = false;
+        static bool wasRightBracketPressed = false;
+        bool isLeftBracketPressed = m_Window->isKeyPressed(GLFW_KEY_LEFT_BRACKET);
+        bool isRightBracketPressed = m_Window->isKeyPressed(GLFW_KEY_RIGHT_BRACKET);
+        
+        if (isLeftBracketPressed && !wasLeftBracketPressed) {
+            m_DayNightSpeed = std::max(0.005f, m_DayNightSpeed - 0.01f);
+            std::cout << "Day/night cycle speed: " << m_DayNightSpeed << std::endl;
+        }
+        
+        if (isRightBracketPressed && !wasRightBracketPressed) {
+            m_DayNightSpeed = std::min(0.5f, m_DayNightSpeed + 0.01f);
+            std::cout << "Day/night cycle speed: " << m_DayNightSpeed << std::endl;
+        }
+        
+        wasLeftBracketPressed = isLeftBracketPressed;
+        wasRightBracketPressed = isRightBracketPressed;
     }
 }
 

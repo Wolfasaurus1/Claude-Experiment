@@ -125,7 +125,7 @@ private:
     
     // Light properties
     glm::vec3 m_LightDir = glm::normalize(glm::vec3(0.2f, -0.9f, 0.3f));
-    glm::vec3 m_LightColor = glm::vec3(1.0f, 0.75f, 0.7f);
+    glm::vec3 m_LightColor = glm::vec3(1.0f, 0.5f, 0.2f);
     
     // Shadow mapping
     bool m_ShadowsEnabled = true;

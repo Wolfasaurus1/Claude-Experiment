@@ -86,7 +86,7 @@ void VoxelRenderer::init() {
             // Calculate bias based on depth map resolution and slope
             vec3 normal = normalize(Normal);
             vec3 lightDirection = normalize(lightDir);
-            float cosTheta = max(dot(normal, lightDirection), 0.0);
+            float cosTheta = max(dot(normal, -lightDirection), 0.0);
             float bias = max(0.0003 * (1.0 - cosTheta), 0.00005);
             
             // For very steep angles (sun near horizon), increase bias slightly
@@ -112,27 +112,35 @@ void VoxelRenderer::init() {
         }
 
         void main() {
+            // In our world, lightDir points FROM the light TO the scene
+            // So when lightDir.y is negative, light is coming from above
+            float sunHeight = -lightDir.y; // Higher value = sun higher in sky
+            
             // Calculate light intensity based on direction (day/night cycle)
             // Light pointing straight down (noon) will be brightest
-            float lightIntensityFactor = max(0.2, -lightDir.y);
+            float lightIntensityFactor = max(0.2, sunHeight);
             vec3 adjustedLightColor = lightColor * lightIntensityFactor;
             
             // Ambient: Adjust based on time of day
             // Higher ambient at noon, lower at night
-            float timeOfDay = max(0.2, -lightDir.y); // 0.0 = night, 1.0 = noon
+            float timeOfDay = max(0.2, sunHeight); // 0.0 = night, 1.0 = noon
             float ambientStrength = mix(0.15, 0.4, timeOfDay);
             vec3 ambient = ambientStrength * adjustedLightColor;
             
-            // Diffuse: Calculate using a normalized normal and light direction.
+            // Diffuse: Calculate using a normalized normal and light direction
             vec3 norm = normalize(Normal);
             vec3 lightDirection = normalize(lightDir);
-            float diff = max(dot(norm, lightDirection), 0.0);
+            
+            // Our light direction vector points FROM light TO surface
+            // But diffuse lighting needs the vector FROM surface TO light for proper calculation
+            // So we need to negate the direction for the dot product 
+            float diff = max(dot(norm, -lightDirection), 0.0);
             vec3 diffuse = diff * adjustedLightColor;
             
-            // Specular: Use a lower exponent and reduced intensity for softer highlights.
+            // Specular: Use a lower exponent and reduced intensity for softer highlights
             float specularStrength = 0.05 * lightIntensityFactor;
             vec3 viewDir = normalize(viewPos - FragPos);
-            vec3 reflectDir = reflect(-lightDirection, norm);
+            vec3 reflectDir = reflect(lightDirection, norm);
             float spec = pow(max(dot(viewDir, reflectDir), 0.0), 10);
             vec3 specular = specularStrength * spec * adjustedLightColor;
             
@@ -149,7 +157,7 @@ void VoxelRenderer::init() {
             // Combine lighting with vertex color and shadow
             vec3 result = (ambient * ambientOcclusion + (1.0 - shadow) * (diffuse + specular)) * Color.rgb;
             
-            // Apply gamma correction for a more natural appearance.
+            // Apply gamma correction for a more natural appearance
             float gamma = 2.2;
             result = pow(result, vec3(1.0 / gamma));
             

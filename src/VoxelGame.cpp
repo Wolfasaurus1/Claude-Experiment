@@ -681,40 +681,41 @@ void VoxelGame::updateLightDirection(float deltaTime) {
         }
         
         // Calculate light direction based on time of day
-        // Morning: Light from east (-x, +y, 0)
-        // Noon: Light from above (0, +y, 0)
-        // Evening: Light from west (+x, +y, 0)
-        // Night: Light from moon (0, -y, 0)
+        // In our coordinate system:
+        // Morning: Light from east (-x, -y, 0)
+        // Noon: Light from above (0, -1, 0)
+        // Evening: Light from west (+x, -y, 0)
+        // Night: Light from below-horizon (0, +y, 0)
         
         float angle = m_DayNightCycle * 2.0f * glm::pi<float>();
         
         // X component varies from -1 to 1 throughout the day
         float x = -cosf(angle);
         
-        // Y component is highest at noon, lowest at midnight
-        float y = sinf(angle);
+        // Y component is negative during day (sun above), positive at night (moon below horizon)
+        float y = -sinf(angle);
         
-        // Z component adds some variation
-        float z = sinf(angle * 0.5f) * 0.5f;
+        // Keep a consistent light direction (slightly angled) for better visual clarity
+        // Stronger Y component for more pronounced sun/moon angle
+        float strength = 0.8f; // Controls how much the light "moves"
         
-        // During night, reduce light intensity
+        // Final light direction vector
+        glm::vec3 newLightDir;
+        
+        // Day time (sun)
         if (y < 0) {
-            // Moonlight is less bright
-            y *= 0.3f; 
-            
-            // For night, make the light direction more vertical (as if from moon)
-            x *= 0.5f;
-            z *= 0.5f;
-        } else {
-            // Ensure minimum height during day for better shadow casting
-            y = std::max(0.4f, y); 
+            // Sun is above horizon - make light come from above
+            newLightDir = glm::normalize(glm::vec3(x * strength, y, 0.3f));
+        }
+        // Night time (moon)
+        else {
+            // Use a consistent moonlight direction with lower intensity
+            // Moon is much less bright and casts softer shadows
+            newLightDir = glm::normalize(glm::vec3(x * 0.3f, -0.2f, 0.1f));
         }
         
-        // Update the light direction
-        glm::vec3 newLightDir = glm::normalize(glm::vec3(x, -std::abs(y), z));
-        
-        // Smoothly interpolate light direction
-        float transitionSpeed = 1.0f; // Adjust for smoother transitions
+        // Smoothly interpolate light direction for gradual transitions
+        float transitionSpeed = 1.0f;
         m_LightDir = glm::normalize(glm::mix(m_LightDir, newLightDir, deltaTime * transitionSpeed));
         
         // Update the light space matrix to match the new light direction

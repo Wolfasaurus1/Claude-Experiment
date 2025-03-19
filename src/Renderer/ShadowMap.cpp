@@ -163,14 +163,13 @@ void ShadowMap::updateLightSpaceMatrix(const glm::vec3& lightDir,
     // For sun-like lighting, we need a wider frustum to capture longer shadows
     float orthoSize = radius * 2.2f;
     
-    // For lights coming in at a steep angle, we might need a deeper frustum
-    float near = 0.1f;
+    // Use different near/far planes based on light direction
+    float near = radius * 0.1f;
     float far = radius * 8.0f;
     
-    // Adjust based on light angle
-    if (lightDirection.y < -0.8f) {
-        // For light coming from directly above, increase near plane
-        near = radius * 0.1f;
+    // For lights coming from nearly horizontal angles, extend the far plane to capture longer shadows
+    if (std::abs(lightDirection.y) < 0.3f) {
+        far = radius * 12.0f;
     }
     
     glm::mat4 lightProjection = glm::ortho(
